@@ -67,12 +67,15 @@ Modo_Prot:
     mov ebp,eax; apunto tanto esp 
     mov esp,eax; como ebp a la base de la pila
 
+    call clrscr; limpio la pantalla
+    
+    ;pusheo de argumento de la funcion print
     push dword[atributos]
     push dword[fila]
     push dword[columna]
     push string_ptr 
 
-    call print
+    call print; imprimo el hola mundo
 
     pop eax
     pop eax
@@ -102,6 +105,7 @@ print:
     mov edi, eax ;cargo en el di la direccion inicial de memoria sobre la que debo escribir!. edi tendra la direccion donde debo empezar a escribir
     mov esi, [EBP+8];cargo en el si la direccion de donde comenzaré a sacar los caracteres. esi tendra la direccion donde tengo el primer caracter del texto
     
+    
 ciclo_print:
     mov al,byte[esi]
     mov byte[edi],al;copio el primer caracter del texto en la primera posicion de memoria
@@ -114,6 +118,24 @@ ciclo_print:
 
 fin_print:
     pop ebp; recupero el valor de ebp original
+    ret
+    
+
+    
+;void clrscr(void)
+;Recibe: NADA 
+clrscr:
+    mov al, 0; caracter nulo
+    mov ah, DEFAULT_ATTRIBUTES; atributos por defecto.
+    mov edi, VIDEO_BASE_ADDRESS
+    mov cx,25*80; cargo en cx el tamaño de la pantalla en "numero de caracteres"
+    
+ciclo_clear:
+    mov word[edi], ax; copio el caracter en la memoria de video
+    add edi,2; incremento dos posicicones ya que cada caracter ocupa 2!
+    loop ciclo_clear
+
+fin_clear:
     ret
     
      
