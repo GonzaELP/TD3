@@ -28,12 +28,105 @@
 GLOBAL		start32
 GLOBAL          print
 GLOBAL          clrscr
-GLOBAL          handler_excep0
+GLOBAL          vect_handlers
+
+;Handlers de excepciones
+;GLOBAL          handler_excep0
+;GLOBAL          handler_excep1
+;GLOBAL          handler_excep2
+;GLOBAL          handler_excep3
+;GLOBAL          handler_excep4
+;GLOBAL          handler_excep5
+;GLOBAL          handler_excep6
+;GLOBAL          handler_excep7
+;GLOBAL          handler_excep8
+;GLOBAL          handler_excep9
+;GLOBAL          handler_excep10
+;GLOBAL          handler_excep11
+;GLOBAL          handler_excep12
+;GLOBAL          handler_excep13
+;GLOBAL          handler_excep14
+;Se saltea la 15, es reservada
+;GLOBAL          handler_excep16
+;GLOBAL          handler_excep17
+;GLOBAL          handler_excep18
+;GLOBAL          handler_excep19
+;GLOBAL          handler_excep20
+;Se saltea 21-29, son reservadas
+;GLOBAL          handler_excep30
+;Se saltea la 31, es reservada
+
+;Handlers de interrupciones
+;GLOBAL          handler_interr0
+;GLOBAL          handler_interr1
+;GLOBAL          handler_interr2
+;GLOBAL          handler_interr3
+;GLOBAL          handler_interr4
+;GLOBAL          handler_interr5
+;GLOBAL          handler_interr6
+;GLOBAL          handler_interr7
+;GLOBAL          handler_interr8
+;GLOBAL          handler_interr9
+;GLOBAL          handler_interr10
+;GLOBAL          handler_interr11
+;GLOBAL          handler_interr12
+;GLOBAL          handler_interr13
+;GLOBAL          handler_interr14
+;GLOBAL          handler_interr15
 
 ;********************************************************************************
 ; Datos
 ;********************************************************************************
-SECTION 	.data	
+SECTION 	.data    
+
+vect_handlers:
+;Handlers de excepciones
+    dd handler_excep0
+    dd handler_excep1
+    dd handler_excep2
+    dd handler_excep3
+    dd handler_excep4
+    dd handler_excep5
+    dd handler_excep6
+    dd handler_excep7
+    dd handler_excep8
+    dd handler_excep9
+    dd handler_excep10
+    dd handler_excep11
+    dd handler_excep12
+    dd handler_excep13
+    dd handler_excep14
+    dd 0x0 ;Se saltea la 15, es reservada
+    dd handler_excep16
+    dd handler_excep17
+    dd handler_excep18
+    dd handler_excep19
+    dd handler_excep20
+    times 9 dd 0x0;Se saltea 21-29, son reservadas
+    dd handler_excep30
+    dd 0x0;Se saltea la 31, es reservada
+
+;Handlers de interrupciones
+    dd handler_interr0
+    dd handler_interr1
+    dd handler_interr2
+    dd handler_interr3
+    dd handler_interr4
+    dd handler_interr5
+    dd handler_interr6
+    dd handler_interr7
+    dd handler_interr8
+    dd handler_interr9
+    dd handler_interr10
+    dd handler_interr11
+    dd handler_interr12
+    dd handler_interr13
+    dd handler_interr14
+    dd handler_interr15
+
+LENGTH_VECT_HANDLERS equ $-vect_handlers
+    
+
 
 atributos dd DEFAULT_ATTRIBUTES;
 fila dd 0
@@ -42,6 +135,9 @@ string_ptr db "Hola mundo"
 db 0x0; fin de cadena
 
 msg_excep0 db "Excepcion 0, division por cero"
+db 0x0
+
+msg_excep6 db "Excepcion 6, codigo de operacion invalido"
 db 0x0
 
 USE32
@@ -73,11 +169,11 @@ start32:
     
     xchg bx,bx 
     
+    ud2; invalid opcode generation
+    
     mov ebx, 0
     mov eax, 10
     div ebx
-    
-    xchg bx,bx
 
 fin:
     nop
@@ -160,7 +256,135 @@ handler_excep0:
     
     call print; 
     hlt;
+    iret
 
+handler_excep1:
+    iret
+
+handler_excep2:
+    iret
+    
+handler_excep3:
+    iret
+
+handler_excep4:
+    iret
+
+handler_excep5:
+    iret
+
+handler_excep6: ;(invalid opcode)
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push msg_excep6
+    
+    call print; 
+    hlt;
+    iret
+
+handler_excep7:
+    iret
+
+handler_excep8:
+    iret
+
+handler_excep9:
+    iret
+
+handler_excep10:
+    iret
+
+handler_excep11:
+    iret
+
+handler_excep12:
+    iret
+
+handler_excep13:
+    iret
+
+handler_excep14:
+    iret
+    
+;Se saltea la 15, es reservada
+handler_excep16:
+    iret
+    
+handler_excep17:
+    iret
+    
+handler_excep18:
+    iret
+    
+handler_excep19:
+    iret
+    
+handler_excep20:
+    iret
+
+;Se saltea 21-29, son reservadas
+
+handler_excep30:
+    iret
+    
+;Se saltea la 31, es reservada
+
+;--------------------------------------------------------------------------------
+; Handlers de interrupciones
+;--------------------------------------------------------------------------------
+handler_interr0:
+    iret
+    
+handler_interr1:
+    iret
+    
+handler_interr2:
+    iret
+    
+handler_interr3:
+    iret
+    
+handler_interr4:
+    iret
+    
+handler_interr5:
+    iret
+
+handler_interr6:
+    iret
+    
+handler_interr7:
+    iret
+    
+handler_interr8:
+    iret
+    
+handler_interr9:
+    iret
+    
+handler_interr10:
+    iret
+    
+handler_interr11:
+    iret
+    
+handler_interr12:
+    iret
+    
+handler_interr13:
+    iret
+    
+handler_interr14:
+    iret
+    
+handler_interr15:
+    iret
+    
+    
 ;********************************************************************************
 ; 						-  -- --- Fin de archivo --- --  -
 ; D. Garcia 																c2013
