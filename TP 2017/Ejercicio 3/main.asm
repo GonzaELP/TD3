@@ -30,49 +30,7 @@ GLOBAL          print
 GLOBAL          clrscr
 GLOBAL          vect_handlers
 
-;Handlers de excepciones
-;GLOBAL          handler_excep0
-;GLOBAL          handler_excep1
-;GLOBAL          handler_excep2
-;GLOBAL          handler_excep3
-;GLOBAL          handler_excep4
-;GLOBAL          handler_excep5
-;GLOBAL          handler_excep6
-;GLOBAL          handler_excep7
-;GLOBAL          handler_excep8
-;GLOBAL          handler_excep9
-;GLOBAL          handler_excep10
-;GLOBAL          handler_excep11
-;GLOBAL          handler_excep12
-;GLOBAL          handler_excep13
-;GLOBAL          handler_excep14
-;Se saltea la 15, es reservada
-;GLOBAL          handler_excep16
-;GLOBAL          handler_excep17
-;GLOBAL          handler_excep18
-;GLOBAL          handler_excep19
-;GLOBAL          handler_excep20
-;Se saltea 21-29, son reservadas
-;GLOBAL          handler_excep30
-;Se saltea la 31, es reservada
-
-;Handlers de interrupciones
-;GLOBAL          handler_interr0
-;GLOBAL          handler_interr1
-;GLOBAL          handler_interr2
-;GLOBAL          handler_interr3
-;GLOBAL          handler_interr4
-;GLOBAL          handler_interr5
-;GLOBAL          handler_interr6
-;GLOBAL          handler_interr7
-;GLOBAL          handler_interr8
-;GLOBAL          handler_interr9
-;GLOBAL          handler_interr10
-;GLOBAL          handler_interr11
-;GLOBAL          handler_interr12
-;GLOBAL          handler_interr13
-;GLOBAL          handler_interr14
-;GLOBAL          handler_interr15
+EXTERN          IDT32
 
 ;********************************************************************************
 ; Datos
@@ -123,7 +81,6 @@ vect_handlers:
     dd handler_interr13
     dd handler_interr14
     dd handler_interr15
-
 LENGTH_VECT_HANDLERS equ $-vect_handlers
     
 
@@ -139,6 +96,13 @@ db 0x0
 
 msg_excep6 db "Excepcion 6, codigo de operacion invalido"
 db 0x0
+
+msg_excep8 db "Excepcion 8, Doble falta ABORTAR"
+db 0x00
+
+msg_excep13 db "Excepcion 13, fallo general de proteccion"
+;db 0x00
+
 
 USE32
 ;********************************************************************************
@@ -167,14 +131,8 @@ start32:
     pop eax
     pop eax
     
-    xchg bx,bx 
+    call generar_GP
     
-    ud2; invalid opcode generation
-    
-    mov ebx, 0
-    mov eax, 10
-    div ebx
-
 fin:
     nop
     jmp fin
@@ -240,7 +198,41 @@ ciclo_clear:
 
 fin_clear:
     ret
+ 
+
+;--------------------------------------------------------------------------------
+; Rutinas para generar excepciones
+;--------------------------------------------------------------------------------
+generar_DE: ;division por cero
+    mov ebx, 0
+    mov eax, 10
+    div ebx
+    ret
+
+generar_UD:
+    db 0xFF
+    db 0xFF
+    ret
     
+generar_DF:
+    mov word[IDT32+8*0+2],0x00 ;rompo el selector de codigo del descriptor de la excepcion cero!, lo mando al nulo
+    mov ebx,0
+    mov eax,10
+    div ebx; genero excepcion cero, como encontrara el descriptor roto, hara doble falta
+    ret
+    
+generar_GP:
+    ;De esta manera genero un mensaje de error con el indice del descriptor en la GDT! (en este caso 1, ya que corresponde a la entrada 1)
+    mov ax, 0x08
+    mov es, ax; cargo el extra segment con el indice del segmento de codigo!
+    mov [es:eax],eax ; intento escribir en el segmento de codigo!! 
+    
+    ;jmp 0x00:0x00 ; salto al selector nulo!!
+    ret
+
+generar_PF: ;hasta no ver paginacion no lo podemos hacer....
+    ret
+
 
 ;--------------------------------------------------------------------------------
 ; Handlers de excepciones
@@ -274,7 +266,6 @@ handler_excep5:
     iret
 
 handler_excep6: ;(invalid opcode)
-    
     call clrscr
     
     push dword[atributos]
@@ -289,7 +280,18 @@ handler_excep6: ;(invalid opcode)
 handler_excep7:
     iret
 
-handler_excep8:
+handler_excep8: ;(double fault)
+    pop edx; popeo el codigo de error
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push msg_excep8
+    
+    call print; 
+    hlt;
     iret
 
 handler_excep9:
@@ -304,7 +306,19 @@ handler_excep11:
 handler_excep12:
     iret
 
-handler_excep13:
+handler_excep13: ;(General protection fault)
+    xchg bx,bx
+   pop edx; popeo el codigo de error
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push msg_excep13
+    
+    call print; 
+    hlt;
     iret
 
 handler_excep14:

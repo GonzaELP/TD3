@@ -24,56 +24,58 @@
 %define STACK_ADDRESS 0x00140000 
 %define STACK_SIZE 32*1024
 
+
+;Definiciones para configurar el PIC
+%define PIC1		0x20		 
+%define PIC2		0xA0	 
+%define PIC1_COMMAND	PIC1
+%define PIC1_DATA	(PIC1+1)
+%define PIC2_COMMAND	PIC2
+%define PIC2_DATA	(PIC2+1)
+
+%define ICW1_PIC1 00010001b 
+;bits 7:5='000' siempre en x86
+;bit 4='1' bit de inicializacion
+;bit 3='0' si es '0' dispara por flanco, si es '1' dispara por nivel
+;bit 2='0' se ignora en x86 y por defecto es '0'
+;bit 1='0' si es '1' indica que hay un solo PIC, si es '0' indica que se colocara el pic en casacada con otro.
+;bit 0='1' si es '1' indica que le mandaremos la ICW4, lo cual en este caso queremos hacer
+%define ICW1_PIC2 ICW1_PIC1
+;Misma ICW1
+
+%define ICW2_PIC1 0x20
+;La ICW2 contiene la base donde comenzara a buscar los handlers es decir Para IRQ0 -> IDT[0x20], para IRQ1->IDT[0x21], etc
+%define ICW2_PIC2 0x28
+;Lo mismo que el anterior, coloco las 8 Interrupciones del segundo pic contiguas en el vector a a las anteriores
+
+%define ICW3_PIC1 00000100b
+;Cada bit hace referencia a un pin de interupcion. Debo encender el bit que represente la linea de interrupcion a la que esta conectada el PIC2  esclavo, en este caso como esta conectado a la IRQ2, enciendoel bit 2.
+
+%define ICW3_PIC2 00000010b
+;En el caso del PIC2 los bits 7:3 van en 0, y los bits 2:0 indican en codigo binario a que linea del maestro se encuentra conectado el esclavo (En este caso IRQ2)
+
+%define ICW4_PIC1 00000001b
+;Lo unico que usamos de aqui es el bit 0, que debe estar en '1' para el caso de uPs 80x86
+
+%define ICW4_PIC2 ICW4_PIC1
+
+%define IMR_PIC1 PIC1_DATA
+%define IMR_PIC2 PIC2_DATA
+;Interrupt mask register para cada PIC
+
+%define EOI_COMMAND 0x20
+
+
 ;********************************************************************************
 ; Simbolos externos y globales
 ;********************************************************************************
 GLOBAL 		Entry
+
+GLOBAL          IDT32
+
 EXTERN		start32
+
 EXTERN          vect_handlers
-;Handlers de excepciones
-;EXTERN          handler_excep0
-;EXTERN          handler_excep1
-;EXTERN          handler_excep2
-;EXTERN          handler_excep3
-;EXTERN          handler_excep4
-;EXTERN          handler_excep5
-;EXTERN          handler_excep6
-;EXTERN          handler_excep7
-;EXTERN          handler_excep8
-;EXTERN          handler_excep9
-;EXTERN          handler_excep10
-;EXTERN          handler_excep11
-;EXTERN          handler_excep12
-;EXTERN          handler_excep13
-;EXTERN          handler_excep14
-;Se saltea la 15, es reservada
-;EXTERN          handler_excep16
-;EXTERN          handler_excep17
-;EXTERN          handler_excep18
-;EXTERN          handler_excep19
-;EXTERN          handler_excep20
-;Se saltea 21-29, son reservadas
-;EXTERN          handler_excep30
-;Se saltea la 31, es reservada
-
-;Handlers de interrupciones
-;EXTERN          handler_interr0
-;EXTERN          handler_interr1
-;EXTERN          handler_interr2
-;EXTERN          handler_interr3
-;EXTERN          handler_interr4
-;EXTERN          handler_interr5
-;EXTERN          handler_interr6
-;EXTERN          handler_interr7
-;EXTERN          handler_interr8
-;EXTERN          handler_interr9
-;EXTERN          handler_interr10
-;EXTERN          handler_interr11
-;EXTERN          handler_interr12
-;EXTERN          handler_interr13
-;EXTERN          handler_interr14
-;EXTERN          handler_interr15
-
 
 EXTERN          __sys_tables_LMA
 EXTERN          __sys_tables_start
@@ -173,109 +175,29 @@ start:									; Punto de entrada
 ; Inicializacion de la idt
 ;--------------------------------------------------------------------------------
 InitIDT:
-
-
-;Excepcion 0 (division por cero)
-    ;mov eax, handler_excep0
-    mov eax, [vect_handlers+0*4]
-    mov [IDT32+8*0], ax
-    mov word[IDT32+8*0+2], SEL_CODIGO
-    mov byte[IDT32+8*0+4],0x00
-    mov byte[IDT32+8*0+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*0+6],ax
+    mov ecx,0
     
-;Excepcion 1
-    ;mov eax, handler_excep1
-    mov eax, [vect_handlers+1*4]
-    mov [IDT32+8*1], ax
-    mov word[IDT32+8*1+2], SEL_CODIGO
-    mov byte[IDT32+8*1+4],0x00
-    mov byte[IDT32+8*1+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*1+6],ax
-
-;Excepcion 2
-    ;mov eax, handler_excep2
-    mov eax, [vect_handlers+2*4]
-    mov [IDT32+8*2], ax
-    mov word[IDT32+8*2+2], SEL_CODIGO
-    mov byte[IDT32+8*2+4],0x00
-    mov byte[IDT32+8*2+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*2+6],ax
-
-;Excepcion 3
-    ;mov eax, handler_excep3
-    mov eax, [vect_handlers+3*4]
-    mov [IDT32+8*3], ax
-    mov word[IDT32+8*3+2], SEL_CODIGO
-    mov byte[IDT32+8*3+4],0x00
-    mov byte[IDT32+8*3+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*3+6],ax
-
-;Excepcion 4
-    ;mov eax, handler_excep4
-    mov eax, [vect_handlers+4*4]
-    mov [IDT32+8*4], ax
-    mov word[IDT32+8*4+2], SEL_CODIGO
-    mov byte[IDT32+8*4+4],0x00
-    mov byte[IDT32+8*4+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*4+6],ax
-
-;Excepcion 5
-    ;mov eax, handler_excep5
-    mov eax, [vect_handlers+5*4]
-    mov [IDT32+8*5], ax
-    mov word[IDT32+8*5+2], SEL_CODIGO
-    mov byte[IDT32+8*5+4],0x00
-    mov byte[IDT32+8*5+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*5+6],ax
-
-;Excepcion 6 (Invalid opcode)
-    ;mov eax, handler_excep6;
-    mov eax, [vect_handlers+6*4]
-    mov [IDT32+8*6], ax
-    mov word[IDT32+8*6+2], SEL_CODIGO
-    mov byte[IDT32+8*6+4],0x00
-    mov byte[IDT32+8*6+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*6+6],ax
-
-;Excepcion 7
-    ;mov eax, handler_excep7
-    mov eax, [vect_handlers+7*4]
-    mov [IDT32+8*7], ax
-    mov word[IDT32+8*7+2], SEL_CODIGO
-    mov byte[IDT32+8*7+4],0x00
-    mov byte[IDT32+8*7+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*7+6],ax
-
-;Excepcion 8
-    ;mov eax, handler_excep8
-    mov eax, [vect_handlers+8*4]
-    mov [IDT32+8*8], ax
-    mov word[IDT32+8*8+2], SEL_CODIGO
-    mov byte[IDT32+8*8+4],0x00
-    mov byte[IDT32+8*8+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*8+6],ax
-
-;Excepcion 9
-    ;mov eax, handler_excep9
-    mov eax, [vect_handlers+9*4]
-    mov [IDT32+8*9], ax
-    mov word[IDT32+8*9+2], SEL_CODIGO
-    mov byte[IDT32+8*9+4],0x00
-    mov byte[IDT32+8*9+5],0x8E;
-    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
-    mov[IDT32+8*9+6],ax
+    mov ebx, LENGTH_IDT ; cargo el largo de la tabla en ebx
+    shr ebx,3 ;desplazo 3 bits hacia la derecha, es decir divido por 8, ya que cada entrada de la IDT es de 8 bytes, con esto tendre el numero de entradas
     
+    cmp ecx, ebx; si ebx es cero, es porque no hay descriptores, no necesito cargar handlers
+    je fin_carga_idt
+
+ciclo_carga_idt:
+    mov eax, [vect_handlers+4*ecx] ;cada handler es una etiqueta, estan espaciadas 4bytes en el vector
+    mov [IDT32+8*ecx], ax
+    mov word[IDT32+8*ecx+2], SEL_CODIGO
+    mov byte[IDT32+8*ecx+4],0x00
+    mov byte[IDT32+8*ecx+5],0x8E;
+    shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
+    mov[IDT32+8*ecx+6],ax
+    inc ecx
+    cmp ecx,ebx ;carga hasta el descriptor CANT_DESCRIPTORES-1!
+    jne ciclo_carga_idt
+
+fin_carga_idt:
     ret
+
 
     
 ;--------------------------------------------------------------------------------
@@ -285,40 +207,39 @@ InitIDT:
 ; A su retorno las Interrupciones de ambos PICs están deshabilitadas.
 ;--------------------------------------------------------------------------------
 InitPIC:
-										; Inicialización PIC Nº1
-										; ICW1
-	mov		al, 11h         			; IRQs activas x flanco, cascada, y ICW4
-	out     20h, al  
-										; ICW2
-	mov     al, bh          			; El PIC Nº1 arranca en INT tipo (BH)
-	out     21h, al
-										; ICW3
-	mov     al, 04h         			; PIC1 Master, Slave ingresa Int.x IRQ2
-	out     21h, al
-										; ICW4
-	mov     al, 01h         			; Modo 8086
-	out     21h, al
-										; Antes de inicializar el PIC Nº2, deshabilitamos 
-										; las Interrupciones del PIC1
-	mov     al, 0FFh
-	out     21h, al
-										; Ahora inicializamos el PIC Nº2
-										; ICW1
-	mov     al, 11h        			  	; IRQs activas x flanco,cascada, y ICW4
-	out     0A0h, al  
-										; ICW2
-	mov    	al, bl          			; El PIC Nº2 arranca en INT tipo (BL)
-	out     0A1h, al
-										; ICW3
-	mov     al, 02h         			; PIC2 Slave, ingresa Int x IRQ2
-	out     0A1h, al
-										; ICW4
-	mov     al, 01h         			; Modo 8086
-	out     0A1h, al
-										; Enmascaramos el resto de las Interrupciones 
-										; (las del PIC Nº2)
-	mov     al, 0FFh
-	out     0A1h, al
+        ;COMIENZO DE INICIALIZACION: envío la ICW1 a los dos PICs por el puerto de comandos
+        mov al,ICW1_PIC1
+	out PIC1_COMMAND,al									
+	
+	mov al, ICW1_PIC2
+	out PIC2_COMMAND,al
+	
+	;MAPEO DE LAS IRQ: la ICW2 va por el port de data no por el de comandos!
+	mov al,ICW2_PIC1
+	out PIC1_DATA,al
+	
+	mov al,ICW2_PIC2
+	out PIC2_DATA,al
+	
+	;SELECCION DE IRQ QUE UNE MAESTRO Y ESCLAVO: envio la ICW3 a los dos PICs, va por data
+        mov al,ICW3_PIC1
+	out PIC1_DATA,al									
+	
+	mov al, ICW3_PIC2
+	out PIC2_DATA,al
+	
+	;SETEO MODO x86: envio la ICW4 a los dos PICs, va por data
+	mov al,ICW4_PIC1
+	out PIC1_DATA,al									
+	
+	mov al, ICW4_PIC2
+	out PIC2_DATA,al
+	
+	;Por el momento enmascaro todas las interrupciones de ambos PICs
+	mov al,0xFF
+	out IMR_PIC1, al
+	out IMR_PIC2, al
+	
 	ret
 
 ;********************************************************************************
