@@ -102,18 +102,21 @@ vect_handlers:
 LENGTH_VECT_HANDLERS equ $-vect_handlers
     
 
-entero_itoa dd 34621536
+entero_itoa dd 0
 buffer_itoa times 11 db 0x00;lo maximo que puede tener un entero de 32 bits es 10 cifras, y 1 mas para el fin de cadena
 
 scan_code_actual db 0x0
 
-ticks db 0x0
+sys_ticks dd 0x00
 
 atributos dd DEFAULT_ATTRIBUTES;
 fila dd 0
 columna dd 0
 string_ptr db "Hola mundo"
 db 0x0; fin de cadena
+
+fila_cuenta dd 24
+columna_cuenta dd 70
 
 msg_inicio:
         db "Ingrese la opcion que desee: #DE=E, #UD=U, #DF=D, #GP=G, #PF=P",0
@@ -136,43 +139,50 @@ SECTION  	.main 			progbits
 
 start32:
     
-    call clrscr
+    espero_tecla: 
+        ;xchg bx,bx
+        in al,0x40
+        cmp dword[sys_ticks],10; si sys
+        jae imprimir_incremental; salto si sys_tics >= 10
     
+        mov al, [scan_code_actual]
+        
+        cmp al,SC_BREAK_E
+        je generar_DE
+        cmp al,SC_BREAK_D
+        je generar_DF
+        cmp al,SC_BREAK_G
+        je generar_GP
+        cmp al,SC_BREAK_U
+        je generar_UD
+        
+    jmp espero_tecla
+    
+    
+    imprimir_incremental:
+    
+   ; call clrscr
     
     push buffer_itoa
     push dword[entero_itoa]
     
-    xchg bx,bx
     call itoa
     
-;     add esp,8; bajo el esp los 2 push
+    add esp,8;add esp,8; bajo el esp los 2 push
     
     push dword[atributos]
-    push dword[fila]
-    push dword[columna]
+    push dword[fila_cuenta]
+    push dword[columna_cuenta]
     push buffer_itoa
     
     call print; 
     
     add esp,16; balo el esp los 4 push
     
-    ;xchg bx,bx
-    ;espero_tecla: 
-       ; hlt; espero una interrupcion por teclado
+    mov dword[sys_ticks],0x00; blanqueo el sys_ticks
+    inc dword[entero_itoa]; incremento el itoa
     
-      ;  mov al, [scan_code_actual]
-        
-       ; cmp al,SC_BREAK_E
-        ;je generar_DE
-        ;cmp al,SC_BREAK_D
-        ;je generar_DF
-        ;cmp al,SC_BREAK_G
-        ;je generar_GP
-        ;cmp al,SC_BREAK_U
-        ;je generar_UD
-        
-    ;jmp espero_tecla
-    
+    jmp espero_tecla
     
 fin:
     nop
@@ -438,11 +448,21 @@ handler_excep30:
 ;--------------------------------------------------------------------------------
 ; Handlers de interrupciones
 ;--------------------------------------------------------------------------------
-handler_interr0: ;handler del timer
-
+handler_interr0: ;handler del timer    
+    pushad
+    pushfd
+    
+    inc dword[sys_ticks]
+    
+    mov al, 0x20
+    out 0x20,al ; Marco el EOI
+    
+    popfd
+    popad
+    iret
     
     
-handler_interr1: ;handler del teclado!
+handler_interr1: ;handler del teclado!  
     pushad; pusheo los registros de proposito general
     pushfd; pusheo 
     
@@ -463,7 +483,19 @@ handler_interr2:
 handler_interr3:
     iret
     
-handler_interr4:
+handler_interr4: ;Interrupcion de puerto serie (COM1)
+    pushad; pusheo los registros de proposito general
+    pushfd; pusheo 
+    
+    in al, DATA_PORT_PS2 ;leo el valor de la tecla
+    mov [scan_code_actual],al ;guardo el scan_code en la variable correspondiente
+    
+    mov al, 0x20
+    out 0x20,al ; Marco el EOI
+    
+    popfd
+    popad
+    
     iret
     
 handler_interr5:

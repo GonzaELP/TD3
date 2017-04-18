@@ -25,7 +25,7 @@
 %define STACK_SIZE 32*1024
 
 
-;Definiciones para configurar el PIC
+;Definiciones para configurar el PIC 8259
 %define PIC1		0x20		 
 %define PIC2		0xA0	 
 %define PIC1_COMMAND	PIC1
@@ -66,8 +66,8 @@
 %define EOI_COMMAND 0x20
 ;Comando para indcar que finaliza la interrupcion
 
-%define MASK_PIC1 0xFD
-;Habilito la interrupcion 1!!
+%define MASK_PIC1 0xFC
+;Habilito las interrupciones 0 y 1!!
 %define MASK_PIC2 0xFF
 ;Enmascaro todas las interrupciones
 
@@ -164,6 +164,9 @@ start:									; Punto de entrada
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
 
+;Inicializacion del PIT
+    call InitPIT
+    
     sti
 ;Salto al main
     mov eax,start32 ;coloco en eax el offset del start
@@ -246,6 +249,32 @@ InitPIC:
 	out IMR_PIC2, al
 	
 	ret
+	
+;--------------------------------------------------------------------------------
+; Inicializacion del controlador del PIT
+;--------------------------------------------------------------------------------
+InitPIT:
+    
+	mov al,00110110b
+	out 0x43, al 
+	;0x43 Puerto del registro de control del 8253.
+	;Byte de control 
+	;  7:6='00', uso el counter/canal 0
+	;  5:4= '11' esta opcion indica que primero se Lee o carga el LSB y luego el MSB
+        ;  3:1='011' Estos 3 bits indican el modo, en este caso: Modo 3= Square Wave generator. Busco generar una señal cuadrada de 10ms de periodo = 100Hz de frecuencia. El modo 3 hace que la salida este en estado ALTO durante la mitad las cuentas y en bajo durante la otra mitad!
+        ;0 ='0' Indica que es un contador binario (si estuviera en '1' seria BCD)
+        
+        
+        mov ax, 1193181 / 100; La frecuencia de clock del contador es 1.193.181Hz / 100 Hz (que es la frecuencia que quiero) me da las cuentas necesarias para lograr una cuadrada de periodo 10ms
+ 
+        ;Ahora debo cargar el canal 0 (0x40) con la cuenta indicada. Para ello, y dado lo especificado en la palabra de control, primero debo cargar el LSB y luego el MSB
+	out	0x40, al	;LSB
+	xchg	ah, al
+	out	0x40, al	;MSB
+
+ret
+
+
 
 ;********************************************************************************
 ; Tablas de sistema
@@ -359,39 +388,39 @@ DESC_EXCEP31 equ $-IDT32 ;Reserved. [-/-/CE=No)]
 
 ;Interrupciones
 ;PIC MAESTRO
-DESC_INTERR32 equ $-IDT32 ;Programmable timer interrupt
+DESC_INTERR0 equ $-IDT32 ;Programmable timer interrupt
     dq 0x0
-DESC_INTERR33 equ $-IDT32 ;Keyboard interrupt
+DESC_INTERR1 equ $-IDT32 ;Keyboard interrupt
     dq 0x0
-DESC_INTERR34 equ $-IDT32 ;Cascade (used internally by the two PICs. never raised)
+DESC_INTERR2 equ $-IDT32 ;Cascade (used internally by the two PICs. never raised)
     dq 0x0
-DESC_INTERR35 equ $-IDT32 ;COM2 (if enabled)
+DESC_INTERR3 equ $-IDT32 ;COM2 (if enabled) 
     dq 0x0
-DESC_INTERR36 equ $-IDT32 ;COM1 (if enabled)
+DESC_INTERR4 equ $-IDT32 ;COM1 (if enabled)
     dq 0x0
-DESC_INTERR37 equ $-IDT32 ;LPT2 (if enabled)
+DESC_INTERR5 equ $-IDT32 ;LPT2 (if enabled)
     dq 0x0
-DESC_INTERR38 equ $-IDT32 ;Floppy Disk
+DESC_INTERR6 equ $-IDT32 ;Floppy Disk
     dq 0x0
-DESC_INTERR39 equ $-IDT32 ;LPT1 / Unreliable "spurious" interrupt (usually)
+DESC_INTERR7 equ $-IDT32 ;LPT1 / Unreliable "spurious" interrupt (usually)
     dq 0x0
     
 ;PIC ESCLAVO
-DESC_INTERR40 equ $-IDT32 ;CMOS real-time-clock (if enabled)
+DESC_INTERR8 equ $-IDT32 ;CMOS real-time-clock (if enabled)
     dq 0x0
-DESC_INTERR41 equ $-IDT32 ;Free for peripherals / Legacy SCSI / NIC
+DESC_INTERR9 equ $-IDT32 ;Free for peripherals / Legacy SCSI / NIC
     dq 0x0
-DESC_INTERR42 equ $-IDT32 ;Free for peripherals / SCSI / NIC
+DESC_INTERR10 equ $-IDT32 ;Free for peripherals / SCSI / NIC
     dq 0x0
-DESC_INTERR43 equ $-IDT32 ;Free for peripherals / SCSI / NIC
+DESC_INTERR11 equ $-IDT32 ;Free for peripherals / SCSI / NIC
     dq 0x0
-DESC_INTERR44 equ $-IDT32 ;PS2 Mouse
+DESC_INTERR12 equ $-IDT32 ;PS2 Mouse
     dq 0x0
-DESC_INTERR45 equ $-IDT32 ;FPU / Coprocessor / Inter-processor
+DESC_INTERR13 equ $-IDT32 ;FPU / Coprocessor / Inter-processor
     dq 0x0
-DESC_INTERR46 equ $-IDT32 ; Primary ATA hard disk
+DESC_INTERR14 equ $-IDT32 ; Primary ATA hard disk
     dq 0x0
-DESC_INTERR47 equ $-IDT32 ; Secondary ATA hard disk
+DESC_INTERR15 equ $-IDT32 ; Secondary ATA hard disk
     dq 0x0
     
 LENGTH_IDT equ $-IDT32
