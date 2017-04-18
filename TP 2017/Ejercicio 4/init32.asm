@@ -71,6 +71,11 @@
 %define MASK_PIC2 0xFF
 ;Enmascaro todas las interrupciones
 
+
+%define COM1 0x3F8 
+;Direccion del puerto serie COM1
+
+
 ;********************************************************************************
 ; Simbolos externos y globales
 ;********************************************************************************
@@ -166,6 +171,9 @@ start:									; Punto de entrada
 
 ;Inicializacion del PIT
     call InitPIT
+    
+;Inicializacion del puerto serie
+    call InitCOM1
     
     sti
 ;Salto al main
@@ -274,6 +282,40 @@ InitPIT:
 
 ret
 
+;--------------------------------------------------------------------------------
+; Inicializacion del controlador de puerto serie
+;--------------------------------------------------------------------------------
+InitCOM1:
+    mov al, 0x00
+    mov dx,COM1+1
+    out dx, al; deshabilito todas las interrupciones
+    
+    mov al, 0x80 
+    mov dx,COM1+3
+    out dx, al; habilito el bit "DLAB"='1' setear el divisor de baud rate.
+    
+    ;como quiero baud rate=9600bauds => 115200/12 = 9600, ek divisor debe ser 12!
+    ;el LSB del divisor va en COM1+0 y el MSB va en COM1+1, MSB=0x00 y LSB=0x0C
+    mov al, 0x0C
+    mov dx, COM1+0
+    out dx,al
+    mov al, 0x00
+    mov dx,COM1+1
+    out dx,al
+    
+    mov al, 00000011b
+    mov dx,COM1+3
+    out dx,al; saco el DLAB='0', break='0', sin paridad = '000', un bit de stop='0', palabra de 8 bits= '11'
+    
+    mov al, 0x00
+    mov dx,COM1+2
+    out dx, al; DESHABILITO LA PILA!, compatibilidad con 8250
+    
+    mov al, 0x00; no habilito ninguna
+    mov dx,COM1+1
+    out dx,al; Habilito las interrupciones de recepcion y de transmision! (0 y 1 respectivamente)
+    
+    ret
 
 
 ;********************************************************************************

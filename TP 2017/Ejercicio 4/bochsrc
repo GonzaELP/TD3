@@ -57,3 +57,7 @@ pci: enabled=1, chipset=i440fx
 #=======================================================================
 # MAGIC_BREAK:
 magic_break: enabled=1
+
+#=======================================================================
+#SERIAL_PORT1
+com1: enabled=1, mode=term, dev=/dev/tty6

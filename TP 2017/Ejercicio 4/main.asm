@@ -112,7 +112,7 @@ sys_ticks dd 0x00
 atributos dd DEFAULT_ATTRIBUTES;
 fila dd 0
 columna dd 0
-string_ptr db "Hola mundo"
+string_ptr db 0x00
 db 0x0; fin de cadena
 
 fila_cuenta dd 24
@@ -156,6 +156,16 @@ start32:
         cmp al,SC_BREAK_U
         je generar_UD
         
+        xchg bx,bx
+    
+        mov dx,0x3F8
+        ;mov al,0x41
+        ;out dx,al
+        in al,dx
+        cmp al,0
+        jne imprimir_serie
+        
+        
     jmp espero_tecla
     
     
@@ -182,6 +192,21 @@ start32:
     mov dword[sys_ticks],0x00; blanqueo el sys_ticks
     inc dword[entero_itoa]; incremento el itoa
     
+    jmp espero_tecla
+    
+    
+    imprimir_serie:
+    
+        mov [string_ptr],al
+        
+        push dword[atributos]
+        push dword[fila]
+        push dword[columna]
+        push string_ptr
+        
+        call print
+        
+        add esp,16; balo el esp los 4 push
     jmp espero_tecla
     
 fin:
