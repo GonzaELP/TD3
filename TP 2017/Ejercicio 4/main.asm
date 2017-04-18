@@ -102,6 +102,9 @@ vect_handlers:
 LENGTH_VECT_HANDLERS equ $-vect_handlers
     
 
+entero_itoa dd 34621536
+buffer_itoa times 11 db 0x00;lo maximo que puede tener un entero de 32 bits es 10 cifras, y 1 mas para el fin de cadena
+
 scan_code_actual db 0x0
 
 ticks db 0x0
@@ -135,30 +138,40 @@ start32:
     
     call clrscr
     
+    
+    push buffer_itoa
+    push dword[entero_itoa]
+    
+    xchg bx,bx
+    call itoa
+    
+;     add esp,8; bajo el esp los 2 push
+    
     push dword[atributos]
     push dword[fila]
     push dword[columna]
-    push msg_inicio
+    push buffer_itoa
     
     call print; 
     
+    add esp,16; balo el esp los 4 push
     
-    xchg bx,bx
-    espero_tecla: 
-        hlt; espero una interrupcion por teclado
+    ;xchg bx,bx
+    ;espero_tecla: 
+       ; hlt; espero una interrupcion por teclado
     
-        mov al, [scan_code_actual]
+      ;  mov al, [scan_code_actual]
         
-        cmp al,SC_BREAK_E
-        je generar_DE
-        cmp al,SC_BREAK_D
-        je generar_DF
-        cmp al,SC_BREAK_G
-        je generar_GP
-        cmp al,SC_BREAK_U
-        je generar_UD
+       ; cmp al,SC_BREAK_E
+        ;je generar_DE
+        ;cmp al,SC_BREAK_D
+        ;je generar_DF
+        ;cmp al,SC_BREAK_G
+        ;je generar_GP
+        ;cmp al,SC_BREAK_U
+        ;je generar_UD
         
-    jmp espero_tecla
+    ;jmp espero_tecla
     
     
 fin:
@@ -173,6 +186,9 @@ fin:
 SECTION .text
 
 
+;********************************************************************************
+; FUNCION PRINT
+;********************************************************************************
 ;void print(char *string_ptr, char columna, char fila, char color)
 ;Recibe:
 ; EIP de regreso: EBP+4
@@ -210,7 +226,9 @@ fin_print:
     ret
     
 
-    
+;********************************************************************************
+; FUNCION CLRSCR
+;********************************************************************************
 ;void clrscr(void)
 ;Recibe: NADA 
 clrscr:
@@ -226,11 +244,53 @@ ciclo_clear:
 
 fin_clear:
     ret
- 
 
-;--------------------------------------------------------------------------------
-; Rutinas para generar excepciones
-;--------------------------------------------------------------------------------
+;********************************************************************************
+; FUNCION ITOA (convierte ascii a entero)
+;********************************************************************************
+;char* itoa(int valor, char* string)
+;Recibe: EIP de regreso (EBP+4)
+;int valor (EBP+8)
+;char* string (EBP+12)
+itoa:
+    push ebp; guardo el ebp original
+    mov ebp,esp; me muevo por la pila con ebp
+    
+    mov eax, [ebp+8]; cargo en eax el valor entero
+    
+    xor edx,edx; pongo edx en cero
+    mov ecx,10; pongo 10 en ecx, que es la cantidad maxima de cifras que puede tener un entero
+    
+    mov edi, [ebp+12]; coloco el puntero de la base de la cadena en el registro de destino
+    
+ciclo_itoa:
+    mov ebx,10 ; cargo ebx con 10
+    div ebx; eax/10
+    add edx,48; en edx esta el resto, le sumo 48 para pasarlo a ascii
+    mov ebx,edx; muevo el ascii a ebx
+    mov [edi+ecx-1],bl; muevo el ascii al string caracter, empiezo desde la ultima cifra!
+    xor edx,edx; limpio edx para que no afecte la proxima division
+    dec ecx; decremento ecx en 1
+    cmp eax,0; es cero?
+    jne ciclo_itoa
+    
+inversion_itoa: ;debo invertir la cadena ya que con este algoritmo se carga en sentido inverso
+    mov esi,edi; cargo destino con origen
+    add esi,ecx; le sumo a la fuente ecx de esta forma me paro en el ultimo digito copiado!
+    
+    mov ebx,11
+    sub ebx,ecx; (11-ecx, de esta forma conozco la cantidad de digitos a mover, para incluso mover el caracter nulo!)
+    mov ecx,ebx; pongo esa cifra en ecx
+    
+    rep movsb; muevo 10-ecx bytes de si a di
+
+fin_itoa:   
+    pop ebp
+    ret
+
+;********************************************************************************
+; RUTINAS PARA GENERAR EXCEPCIONES
+;********************************************************************************
 generar_DE: ;division por cero
     mov ebx, 0
     mov eax, 10
