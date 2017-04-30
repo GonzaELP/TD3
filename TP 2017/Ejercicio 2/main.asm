@@ -60,11 +60,7 @@ start32:
     push string_ptr 
 
     call print; imprimo el hola mundo
-
-    pop eax
-    pop eax
-    pop eax
-    pop eax
+    add esp,16; bajo los 4 push
 
 fin:
     nop

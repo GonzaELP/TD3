@@ -132,6 +132,8 @@ msg_excep8 db "Excepcion 8, Doble falta ABORTAR",0
 
 msg_excep13 db "Excepcion 13, fallo general de proteccion",0
 
+msg_excep14 db "Excepcion 14, fallo de pagina",0
+
 
 
 USE32
@@ -157,6 +159,8 @@ start32:
         je generar_GP
         cmp al,SC_BREAK_U
         je generar_UD
+        cmp al,SC_BREAK_P
+        je generar_PF
         
     
         cmp byte[buffer_COM1],0x00 ;si recibio algo
@@ -347,6 +351,7 @@ generar_GP:
     ret
 
 generar_PF: ;hasta no ver paginacion no lo podemos hacer....
+    jmp 0xF0000000 ; intento saltar a un lugar que no habilite en la paginacion...
     ret
 
 
@@ -441,6 +446,17 @@ handler_excep13: ;(General protection fault)
 
 handler_excep14:
     pop edx; popeo el codigo de error
+        
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push msg_excep14
+    
+    call print; 
+    hlt;
+        
     iret
     
 ;Se saltea la 15, es reservada

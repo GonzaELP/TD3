@@ -88,8 +88,6 @@ LENGTH_VECT_HANDLERS equ $-vect_handlers
 atributos dd DEFAULT_ATTRIBUTES;
 fila dd 0
 columna dd 0
-string_ptr db "Hola mundo"
-db 0x0; fin de cadena
 
 msg_excep0 db "Excepcion 0, division por cero"
 db 0x0
@@ -117,19 +115,6 @@ start32:
     mov ebp,esp; apunto ebp a esp
 
     call clrscr; limpio la pantalla
-    
-    ;pusheo de argumento de la funcion print
-    push dword[atributos]
-    push dword[fila]
-    push dword[columna]
-    push string_ptr 
-
-    call print; imprimo el hola mundo
-
-    pop eax
-    pop eax
-    pop eax
-    pop eax
     
     call generar_GP
     
@@ -307,7 +292,6 @@ handler_excep12:
     iret
 
 handler_excep13: ;(General protection fault)
-    xchg bx,bx
    pop edx; popeo el codigo de error
     
     call clrscr
