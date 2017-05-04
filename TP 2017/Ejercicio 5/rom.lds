@@ -33,17 +33,16 @@ SECTIONS
 		  __mdata_start = . ; *(.data);
 		  __mdata_end = . ; }
 		  
-        .pag_tables 0x00130000 : 
-	  AT ( LOADADDR(.mdata) + SIZEOF(.mdata) )                           
-		{ __pag_tables_LMA = LOADADDR(.pag_tables);                   /*__sys_tables_LMA tendra la direccion LMA de las tablas*/
-		__pag_tables_start = .;                                   /*__sys_tables_start tendra el comienzo de las tablas en VMA*/
-		*(.pag_tables*);                                          /*Incluye todas las secciones sys_tables*/
+		  
+        .tablas_paginas 0x00130000 : 
+                {__pag_tables_start = .; 
+                *(.pag_tables);
 		__pag_tables_end = . ;}           
 	
 	__datos_no_iniciali_inicio = .;
 	 .bss 0x00140000 :
 		{ __bss_start = . ; 
-		*(.bss) *(COMMON);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
+		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
 		*(.dat_no_inic*);
 		__bss_end = . ;}
   

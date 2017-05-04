@@ -1,7 +1,7 @@
 AC			= nasm
 AFLAGS		= -felf32
 LD			= ld
-LFLAGS		= -z max-page-size=0x01000 --oformat=binary -m elf_i386
+LFLAGS		= -z max-page-size=0x01000 --oformat=binary -m elf_i386 -Map TP.map
 LDSCRIPT	= rom.lds
 ODFLAGS		= -CprsSx --prefix-addresses
 
@@ -69,4 +69,4 @@ bochs:
 clean:
 	@echo	''
 	@echo	'---> Limpieza de archivos'
-	rm -f *.*~ *~ *.o *.lst *.bin *.rom *.txt *.elf *.img *.dis *.s CheckSumGen
+	rm -f *.*~ *~ *.o *.lst *.bin *.rom *.txt *.elf *.img *.dis *.s *.map CheckSumGen
