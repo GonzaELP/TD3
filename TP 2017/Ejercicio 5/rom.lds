@@ -34,17 +34,18 @@ SECTIONS
 		  __mdata_end = . ; }
 		  
 		  
-        .tablas_paginas 0x00130000 : 
-                {__pag_tables_start = .; 
-                *(.pag_tables);
-		__pag_tables_end = . ;}           
-	
 	__datos_no_iniciali_inicio = .;
-	 .bss 0x00140000 :
+	 .bss 0x00130000 :
 		{ __bss_start = . ; 
 		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
 		*(.dat_no_inic*);
-		__bss_end = . ;}
+		__bss_end = . ;} 
+		
+            
+        .tablas_paginas ALIGN(0x1000) : 
+                {__pag_tables_start = . ; 
+                *(.pag_tables);
+		__pag_tables_end = . ;} 
   
 
 }

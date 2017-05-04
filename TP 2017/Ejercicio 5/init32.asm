@@ -554,6 +554,7 @@ my_idtr: dw LENGTH_IDT-1
          dd IDT32
 
 SECTION		.pag_tables nobits ; VA NO BITS PARA LOS DATOS NO INICIALIZADOS!!!!
+
 PAGE_DIR:
     resd 1024; defino las 1024 entradas del directorio de paginas
 ;LENGTH_PAGE_DIR equ $-PAGE_DIR
