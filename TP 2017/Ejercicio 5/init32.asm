@@ -21,8 +21,8 @@
 ;********************************************************************************
 ; Definicion de la base y el largo de la pila
 ;********************************************************************************
-%define STACK_ADDRESS 0x00140000 
-%define STACK_SIZE 32*1024
+%define STACK_ADDRESS 0x00140000     
+%define STACK_SIZE 1024
 
 
 ;Definiciones para configurar el PIC 8259
@@ -99,8 +99,17 @@ EXTERN          __mdata_end
 EXTERN          __pag_tables_LMA
 EXTERN          __pag_tables_start
 EXTERN          __pag_tables_end
+EXTERN          __func_LMA
+EXTERN          __func_start
+EXTERN          __func_end
+
+EXTERN          __stack_LMA
+EXTERN          __stack_start
+EXTERN          __stack_end
+
 EXTERN          __bss_start
 EXTERN          __bss_end
+
 
 
 ;********************************************************************************
@@ -125,11 +134,14 @@ start:									; Punto de entrada
 	INCBIN "init16.bin"					; Binario de 16 bits
 
         
-    ;Saltar a Init32
-    
+ 
+ ;Saltar a Init32
+ 
+ 
 ;;CODIGO AGREGADO POR GONZALO
-
+    
 ;Movimiento del codigo a los lugares que corresponda! los parametros los pasa el Linker Script
+    
     
     mov esi, __sys_tables_LMA
     mov edi, __sys_tables_start
@@ -141,12 +153,24 @@ start:									; Punto de entrada
     mov edi, __main_start
     mov ecx, __main_end
     sub ecx,__main_start ;calculo la longitud en memoria
+    rep movsb
+    
+    mov esi, __func_LMA
+    mov edi, __func_start
+    mov ecx, __func_end
+    sub ecx, __func_start ;calculo la longitud en memoria
     rep movsb 
+    
+    mov edi, __stack_start
+    mov ecx, __stack_end
+    sub ecx, __stack_start
+    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
+    
     
     mov esi, __mdata_LMA
     mov edi, __mdata_start
     mov ecx, __mdata_end
-    sub ecx,__mdata_start ;calculo la longitud en memoria
+    sub ecx, __mdata_start ;calculo la longitud en memoria
     rep movsb 
     
     xor eax,eax ;limpio el registro eax para que quede en cero
@@ -155,29 +179,32 @@ start:									; Punto de entrada
     sub ecx, __bss_start
     rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
     
-    xor eax,eax ;limpio el registro eax para que quede en cero
-    mov edi, __pag_tables_start
-    mov ecx, __pag_tables_end
-    sub ecx, __pag_tables_start
-    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
     
     
-    
-
-;Carga de las tablas de sistema
-    lgdt [my_gdtr]
-    lidt [my_idtr]
+    ;xor eax,eax ;limpio el registro eax para que quede en cero
+    ;mov edi, __pag_tables_start
+    ;mov ecx, __pag_tables_end
+    ;sub ecx, __pag_tables_start
+    ;rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
     
 ;Carga de la IDT
     call InitIDT
 
-;Inicializo la PAGINACION!! buuuu
-    call InitPAG
+;Carga de las tablas de sistema
+    lgdt [my_gdtr]
+    lidt [my_idtr] 
+
+;Inicializo las tablas de PAGINACION!!
+    call InitTabPAG
+    
+    mov eax,CR0; cargo CR0 en eax
+    or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
+    mov CR0,eax 
     
 ;Inicializacion de la pila.
     mov ax,SEL_DATOS
     mov ss,ax
-    mov esp,STACK_ADDRESS+STACK_SIZE ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
+    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
 
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -229,7 +256,7 @@ fin_carga_idt:
 ;--------------------------------------------------------------------------------
 ; Inicializacion de las tablas de paginacion!
 ;--------------------------------------------------------------------------------
-InitPAG:
+InitTabPAG:
  ;Busco hacer identity mapping, direcciones lineales se corresponden con las fisicas, ahora uso paginas de 4k
  ;Debo mapear las paginas de la rom y el Vector de reset es decir desde 0xFFFF0000 a 0xFFFF FFFF (es decir los ultimos 64k = 16 paginas) de la ultima entrada del directorio!.
  
@@ -266,7 +293,7 @@ ciclo_InitPAG1:
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
     mov dword[PAGE_TABLE1+ebx*4],eax; cargo la entrada
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
-    cmp eax, 0x150000;
+    cmp eax, 0x160000;
     jb ciclo_InitPAG1; me voy si ya cargue todas las paginas!.
     
 
@@ -289,15 +316,7 @@ fin_InitPAG:
 mov eax, PAGE_DIR; cargo en eax la base del directorio de paginas
 mov CR3, eax; cargo CR3 con la base del directorio de paginas!!
 
-mov eax,CR0; cargo CR0 en eax
-or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
-mov CR0,eax 
 
-
-
-
-
-    
 ;--------------------------------------------------------------------------------
 ; Inicializacion del controlador de interrupciones
 ; Corre la base de los tipos de interrupción de ambos PICs 8259A de la PC a los 8 tipos consecutivos a 
@@ -443,7 +462,6 @@ my_gdtr: dw LENGTH_GDT-1
 ;--------------------------------------------------------------------------------
 ; IDT
 ;--------------------------------------------------------------------------------
-
 IDT32:
 ;Excepciones del procesador
 DESC_EXCEP0 equ $-IDT32 ;Divide-by-zero error. [Fault/#DE/CE=No]
@@ -553,6 +571,9 @@ LENGTH_IDT equ $-IDT32
 my_idtr: dw LENGTH_IDT-1
          dd IDT32
 
+SECTION     .stack nobits
+resd STACK_SIZE
+
 SECTION		.pag_tables nobits ; VA NO BITS PARA LOS DATOS NO INICIALIZADOS!!!!
 
 PAGE_DIR:
@@ -566,6 +587,8 @@ PAGE_TABLE1:
 PAGE_TABLE1024:
     resd 1024; defino las 1024 entradas de la tabla de paginas!
 ;LENGHT_PAGE_TABLE1024 equ $-PAGE_TABLE1024
+
+
 
 
 
