@@ -183,7 +183,7 @@ start32:
     jmp espero_tecla
     
     imprimir_incremental:
-    
+
     push buffer_itoa
     push dword[entero_itoa]
     
@@ -333,9 +333,21 @@ fin_itoa:
 
 
 ;********************************************************************************
-; RUTINAS PARA GENERAR DIRECCIONES ALEATORIAS
+; RUTINA PARA GENERAR DIRECCIONES ALEATORIAS
 ;********************************************************************************
-    
+;Devuelve en eax una direccion de  32 bits generada de manera aleatoeria
+
+gen_random_addr32:
+    jmp .inicio_gen_addr
+    .semilla: dd 0x00
+    .inicio_gen_addr:
+      mov eax, 314159265
+      mul dword [.semilla]
+      add eax, 123456789
+      mov [.semilla],eax
+    ret
+
+
 ;********************************************************************************
 ; RUTINAS PARA GENERAR EXCEPCIONES
 ;********************************************************************************
