@@ -47,6 +47,8 @@ GLOBAL		start32
 GLOBAL          print
 GLOBAL          clrscr
 GLOBAL          vect_handlers
+GLOBAL          LENGTH_VECT_HANDLERS_EXCEP
+GLOBAL          LENGTH_VECT_HANDLERS_INTERR
 
 EXTERN          IDT32
 
@@ -99,7 +101,7 @@ vect_handlers:
     dd handler_interr13
     dd handler_interr14
     dd handler_interr15
-LENGTH_VECT_HANDLERS equ $-vect_handlers
+
     
 
 entero_itoa dd 0
@@ -143,14 +145,13 @@ USE32
 SECTION  	.main 			progbits
 
 start32:
-    
+   
     espero_tecla: 
         in al,0x40
         cmp dword[sys_ticks],10; si sys
         jae imprimir_incremental; salto si sys_tics >= 10
-    
+
         mov al, [scan_code_actual]
-        
         cmp al,SC_BREAK_E
         je generar_DE
         cmp al,SC_BREAK_D
@@ -217,7 +218,7 @@ fin:
 ;FUNCIONES AGREGADAS
 SECTION .func progbits
 
-
+times 15 dd 0x00
 ;********************************************************************************
 ; FUNCION PRINT
 ;********************************************************************************

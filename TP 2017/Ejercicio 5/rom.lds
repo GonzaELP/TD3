@@ -11,14 +11,14 @@ SECTIONS
 	  AT ( 0xFFFF0000 )							/* Desplazo para alinear a 0x100 el offset de init16.asm */
 		{ *(.init); }
 		
-	.tables 0x00110000 : 
+	.tables 0x00008000 : 
 	  AT ( LOADADDR(.init) + SIZEOF(.init) )                           /*LMA de .init (es decir 0xFFFF0000) + "Lo que ocupe init" allí se                                           posicionará en LMA */
 		{ __sys_tables_LMA = LOADADDR(.tables);                   /*__sys_tables_LMA tendra la direccion LMA de las tablas*/
 		__sys_tables_start = .;                                   /*__sys_tables_start tendra el comienzo de las tablas en VMA*/
 		*(.sys_tables*);                                          /*Incluye todas las secciones sys_tables*/
 		__sys_tables_end = . ;}                                   /*Luego de incluirlas estaremos parados en la posicion final de las tablas en VMA*/
 		
-	. = 0x00120000; 							/* location counter = VMA */
+	. = 0x0000A000; 							/* location counter = VMA */
 	__main_start = . ;							/* VMA del punto de entrada 1Mb */
 	.main :										/* seccion de salida */
 	  AT ( LOADADDR(.tables) + SIZEOF(.tables) )
@@ -27,7 +27,7 @@ SECTIONS
 		__main_end = . ; }                        /*Luego de incluir todo es el "__main_end" en VMA*/
 		
 		
-        . = 0x00130000; 							/* location counter = VMA */
+        . = 0x0000D000; 							/* location counter = VMA */
 	__func_start = . ;							/* VMA del punto de entrada 1Mb */
 	.func :										/* seccion de salida */
 	  AT ( LOADADDR(.main) + SIZEOF(.main) )
@@ -37,26 +37,31 @@ SECTIONS
 		
         
 		
-	.mdata 0x00140000 : 	
+	.mdata 0x0000B000 : 	
 	  AT ( LOADADDR(.func) + SIZEOF(.func) )
 		{ __mdata_LMA = LOADADDR(.mdata);
 		  __mdata_start = . ; *(.data);
 		  __mdata_end = . ; }
 		  
-		  
-	__datos_no_iniciali_inicio = .;
-	 .bss 0x00150000 :
-		{ __bss_start = . ; 
-		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
-		*(.dat_no_inic*);
-		__bss_end = . ;} 
-        
-     
-	 .stack :
+	 
+         .stack :
 		{ __stack_start = . ; 
 		*(.stack);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
 		__stack_end = . ;} 
 		
+	__datos_no_iniciali_inicio = .;
+	 .bss :
+		{ __bss_start = . ; 
+		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
+		*(.dat_no_inic*);
+		__bss_end = . ;} 
+		
+		
+         .sys_idt :
+		{ __sys_idt_start = . ; 
+		*(.sys_idt);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
+		__sys_idt_end = . ;} 
+     
             
         .tablas_paginas ALIGN(0x1000) : 
                 {__pag_tables_start = . ; 

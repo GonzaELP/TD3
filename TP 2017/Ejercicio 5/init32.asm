@@ -22,7 +22,7 @@
 ; Definicion de la base y el largo de la pila
 ;********************************************************************************
 %define STACK_ADDRESS 0x00140000     
-%define STACK_SIZE 1024
+%define STACK_SIZE 1023
 
 
 ;Definiciones para configurar el PIC 8259
@@ -74,6 +74,9 @@
 
 %define COM1 0x3F8 
 ;Direccion del puerto serie COM1
+
+%define LENGTH_VECT_HANDLERS_EXCEP 32*4
+%define LENGTH_VECT_HANDLERS_INTERR 16*4
 
 
 ;********************************************************************************
@@ -180,13 +183,6 @@ start:									; Punto de entrada
     rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
     
     
-    
-    ;xor eax,eax ;limpio el registro eax para que quede en cero
-    ;mov edi, __pag_tables_start
-    ;mov ecx, __pag_tables_end
-    ;sub ecx, __pag_tables_start
-    ;rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
-    
 ;Carga de la IDT
     call InitIDT
 
@@ -211,16 +207,19 @@ start:									; Punto de entrada
 
 ;Inicializacion del PIT
     call InitPIT
-    
+
 ;Inicializacion del puerto serie
     call InitCOM1
     
     sti
 ;Salto al main
+
+  
     mov eax,start32 ;coloco en eax el offset del start
     push dword SEL_CODIGO ; Pusheo primero el selector de codigo
     push eax ;luego el offset
     retf ;si hago un return far saltare a SEL_CODIGO:start32 que es en el archivo "main"
+
 
 ;;CODIGO AGREGADO POR GONZALO
     
@@ -231,14 +230,15 @@ start:									; Punto de entrada
 ;--------------------------------------------------------------------------------
 InitIDT:
     mov ecx,0
-    
-    mov ebx, LENGTH_IDT ; cargo el largo de la tabla en ebx
-    shr ebx,3 ;desplazo 3 bits hacia la derecha, es decir divido por 8, ya que cada entrada de la IDT es de 8 bytes, con esto tendre el numero de entradas
+    mov ebx, LENGTH_VECT_HANDLERS_EXCEP ; cargo del vector de handlers de excepciones en ebx
+    shr ebx,2 ;desplazo 2 bits hacia la derecha, es decir divido por 4, ya que cada handler es de 4 bytes, con esto tendre el numero de handlers
     
     cmp ecx, ebx; si ebx es cero, es porque no hay descriptores, no necesito cargar handlers
     je fin_carga_idt
 
-ciclo_carga_idt:
+    xchg bx,bx
+;carga de la parte de excepciones de la IDT
+ciclo_carga_idt_excep:
     mov eax, [vect_handlers+4*ecx] ;cada handler es una etiqueta, estan espaciadas 4bytes en el vector
     mov [IDT32+8*ecx], ax
     mov word[IDT32+8*ecx+2], SEL_CODIGO
@@ -247,8 +247,23 @@ ciclo_carga_idt:
     shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
     mov[IDT32+8*ecx+6],ax
     inc ecx
-    cmp ecx,ebx ;carga hasta el descriptor CANT_DESCRIPTORES-1!
-    jne ciclo_carga_idt
+    cmp ecx,ebx ;carga hasta el descriptor CANT_HANDLERS-1!
+    jne ciclo_carga_idt_excep
+
+    mov edx, LENGTH_VECT_HANDLERS_INTERR; cargo la cantidad de handlers de interrupciones en edx
+    shr edx,2; la divido por 4, ya que cada handler tiene 4 bytes, con esto tendre el numero de handlers de interrupciones
+    add ebx,edx; le sumo a ebx, edx. Con esto tendre el total de handlers de interrupciones y excepciones y se hasta donde tengo que llenar la IDT 
+ciclo_carga_idt_interr:
+     mov eax, [vect_handlers+4*ecx] ;cada handler es una etiqueta, estan espaciadas 4bytes en el vector
+     mov [IDT32+8*ecx], ax
+     mov word[IDT32+8*ecx+2], SEL_CODIGO
+     mov byte[IDT32+8*ecx+4],0x00
+     mov byte[IDT32+8*ecx+5],0x8E;
+     shr eax, 16 ; debo borrar los primeros 16 bits, asi me quedo con la parte alta
+     mov[IDT32+8*ecx+6],ax
+     inc ecx
+     cmp ecx,ebx ;carga hasta el descriptor CANT_HANDLERS-1!
+     jne ciclo_carga_idt_interr    
 
 fin_carga_idt:
     ret
@@ -458,118 +473,21 @@ LENGTH_GDT equ $-GDT32
 my_gdtr: dw LENGTH_GDT-1
          dd GDT32
 
-
+my_idtr: dw LENGTH_IDT-1
+         dd IDT32
+         
 ;--------------------------------------------------------------------------------
 ; IDT
 ;--------------------------------------------------------------------------------
-IDT32:
-;Excepciones del procesador
-DESC_EXCEP0 equ $-IDT32 ;Divide-by-zero error. [Fault/#DE/CE=No]
-    dq 0x0
-DESC_EXCEP1 equ $-IDT32 ;Debug. [Fault or Trap/#DB/CE=No]
-    dq 0x0
-DESC_EXCEP2 equ $-IDT32 ;Non-maskable interrupt. [Interrupt/-/CE=No]
-    dq 0x0
-DESC_EXCEP3 equ $-IDT32 ;Breakpoint. [Trap/#BP/CE=No]
-    dq 0x0
-DESC_EXCEP4 equ $-IDT32 ;Overflow. [Trap/#OF/CE=No]
-    dq 0x0
-DESC_EXCEP5 equ $-IDT32 ;Bound range exceeded . [Fault/#BR/CE=No]
-    dq 0x0
-DESC_EXCEP6 equ $-IDT32 ;Invalid opcode. [Fault/#UD/CE=No]
-    dq 0x0 
-DESC_EXCEP7 equ $-IDT32 ;Device not available. [Fault/#NM/CE=No]
-    dq 0x0
-DESC_EXCEP8 equ $-IDT32 ;Double fault. [Abort/#DF/CE=Si(Cero)]
-    dq 0x0 
-DESC_EXCEP9 equ $-IDT32 ;Coprocessor segment overrun. [Fault/-/CE=No]
-    dq 0x0 
-DESC_EXCEP10 equ $-IDT32 ;Invalid TSS. [Fault/#TS/CE=Yes)]
-    dq 0x0 
-DESC_EXCEP11 equ $-IDT32 ;Segment not Present. [Fault/#TS/CE=Yes)]
-    dq 0x0 
-DESC_EXCEP12 equ $-IDT32 ;Stack segment fault. [Fault/#SS/CE=Yes)]
-    dq 0x0 
-DESC_EXCEP13 equ $-IDT32 ;General protection fault. [Fault/#GP/CE=Yes)]
-    dq 0x0 
-DESC_EXCEP14 equ $-IDT32 ;Page fault. [Fault/#PF/CE=Yes)]
-    dq 0x0 
-DESC_EXCEP15 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0 
-DESC_EXCEP16 equ $-IDT32 ;x87 floating-point exception. [Fault/#MF/CE=No)]
-    dq 0x0 
-DESC_EXCEP17 equ $-IDT32 ;Alignment check. [Fault/#AC/CE=Yes)]
-    dq 0x0  
-DESC_EXCEP18 equ $-IDT32 ;Machine check. [Abort/#MC/CE=No)]
-    dq 0x0 
-DESC_EXCEP19 equ $-IDT32 ;SIMD floating-point exception. [Fault/#XM o #XF/CE=No)]
-    dq 0x0 
-DESC_EXCEP20 equ $-IDT32 ;Virtualization exception. [Fault/#VE/CE=No)]
-    dq 0x0 
-DESC_EXCEP21 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0 
-DESC_EXCEP22 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP23 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP24 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP25 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP26 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP27 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP28 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP29 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
-DESC_EXCEP30 equ $-IDT32 ;Security exception. [-/#SX/CE=Yes)]
-    dq 0x0
-DESC_EXCEP31 equ $-IDT32 ;Reserved. [-/-/CE=No)]
-    dq 0x0
+SECTION .sys_idt nobits
 
-;Interrupciones
-;PIC MAESTRO
-DESC_INTERR0 equ $-IDT32 ;Programmable timer interrupt
-    dq 0x0
-DESC_INTERR1 equ $-IDT32 ;Keyboard interrupt
-    dq 0x0
-DESC_INTERR2 equ $-IDT32 ;Cascade (used internally by the two PICs. never raised)
-    dq 0x0
-DESC_INTERR3 equ $-IDT32 ;COM2 (if enabled) 
-    dq 0x0
-DESC_INTERR4 equ $-IDT32 ;COM1 (if enabled)
-    dq 0x0
-DESC_INTERR5 equ $-IDT32 ;LPT2 (if enabled)
-    dq 0x0
-DESC_INTERR6 equ $-IDT32 ;Floppy Disk
-    dq 0x0
-DESC_INTERR7 equ $-IDT32 ;LPT1 / Unreliable "spurious" interrupt (usually)
-    dq 0x0
-    
-;PIC ESCLAVO
-DESC_INTERR8 equ $-IDT32 ;CMOS real-time-clock (if enabled)
-    dq 0x0
-DESC_INTERR9 equ $-IDT32 ;Free for peripherals / Legacy SCSI / NIC
-    dq 0x0
-DESC_INTERR10 equ $-IDT32 ;Free for peripherals / SCSI / NIC
-    dq 0x0
-DESC_INTERR11 equ $-IDT32 ;Free for peripherals / SCSI / NIC
-    dq 0x0
-DESC_INTERR12 equ $-IDT32 ;PS2 Mouse
-    dq 0x0
-DESC_INTERR13 equ $-IDT32 ;FPU / Coprocessor / Inter-processor
-    dq 0x0
-DESC_INTERR14 equ $-IDT32 ; Primary ATA hard disk
-    dq 0x0
-DESC_INTERR15 equ $-IDT32 ; Secondary ATA hard disk
-    dq 0x0
-    
+IDT32:
+resq LENGTH_VECT_HANDLERS_EXCEP
+resq LENGTH_VECT_HANDLERS_INTERR
 LENGTH_IDT equ $-IDT32
 
-my_idtr: dw LENGTH_IDT-1
-         dd IDT32
+
+
 
 SECTION     .stack nobits
 resd STACK_SIZE
