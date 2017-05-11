@@ -53,6 +53,7 @@ GLOBAL          LENGTH_VECT_HANDLERS_EXCEP
 GLOBAL          LENGTH_VECT_HANDLERS_INTERR
 
 EXTERN          IDT32
+EXTERN          PAGE_DIR
 
 ;********************************************************************************
 ; Datos
@@ -150,8 +151,9 @@ USE32
 SECTION  	.main 			progbits
 
 start32:
-   
+        jmp 0xC0000000
     espero_tecla: 
+        
         in al,0x40
         cmp dword[sys_ticks],10; si sys
         jae imprimir_incremental; salto si sys_tics >= 10
@@ -488,18 +490,121 @@ handler_excep13: ;(General protection fault)
     iret
 
 handler_excep14:
+    ;Conservo en: eax = Direccion lineal (SOLO TEMPORALMENTE)
+    ;             edx = direccion lineal desplazada 22 bits. Es decir entrada del directorio de paginas
+    ;             ecx = Entrada de la tabla de paginas (bits 21 a 12)
+    
+    xchg bx,bx 
+    pushad
     pop edx; popeo el codigo de error
-        
+    
+    jmp .alocar_pagina
+    
+    .msg_pise_rom db "Excepcion 14: Fallo de pagina, intento de acceder a ROM!",0
+    .msg_pise_mem_cableada db "Excepcion 14: Fallo de pagina, intento fallido de acceso a memoria mapeada",0
+    .msg_pagina_alocada db "Excepcion 14: Fallo de pagina, Pagina no presente, se asigno una pagina nueva",0
+    .msg_pagina_presente db "Excepcion 14: Pagina PRESENTE, se debe a otra cosa...",0
+    
+    
+    jmp .alocar_pagina
+    
+    .phys_mem_actual dd  0x400000; las direcciones fisicas arrancan en 0x400000!
+    
+    .alocar_pagina:
+    mov eax,cr2; en CR2 quedo la direccion lineal que causó el fallo de pagina
+    mov edx,eax
+    shr edx,22; si quiero saber a que entrada del DIRECTORIO pertenece, debo quedarme con los primeros 10 bits.
+    mov ecx,eax;
+    shr ecx,12; elimino los 12 bits menos significativos
+    and ecx, 0xFFC00; con esto elimino los 10 MSb, que corresponden al directorio y me quedo con la entrada de la TABLA
+     
+    cmp eax, 0xFFFF0000 ;si intenta acceder a memoria por encima de esto.
+    ja .pise_rom
+    
+    cmp edx,0; si pertenece a la entrada 0...
+    je .pise_mem_cableada
+    
+    ;consulto si la entrada del directorio esta presente
+    test dword[PAGE_DIR+edx*4], 0x01
+    jz .tabla_no_presente
+    jmp .cargar_tabla
+ 
+    .tabla_no_presente:
+    mov ebx,[.phys_mem_actual]; cargo en ebx la memoria fisica actual. A medida que voy definiendo nuevas paginas se va llenando la memoria y aumenta este valor.
+    and ebx, 0xFFFFF000; por las dudas borro los 12LSb, ya que tiene que quedar multiplo de 4k en memoria fisica!!.
+    or ebx,0x03; le seteo los atributos en Lectura/Escritura y Presente
+    mov [PAGE_DIR+edx*4],ebx; Cargo en la entrada del directorio que corresponda, la ubicacion fisica de la nueva tabla de paginas!.
+    add dword[.phys_mem_actual],0x1000; Incremento la posicion de memoria fisica actual en 4k!!!
+    jmp .cargar_tabla
+    
+    .cargar_tabla:
+    mov ebx,[PAGE_DIR+edx*4]; obtengo la entrada del directorio en ebx
+    and ebx, 0xFFFFF000; borro los ultimos 3 bits, con esto me quedo con la direccion de memoria fisica de la tabla!!
+    ;test dword[ebx+ecx*4],0x01; compruebo si el bit de presente la pagina esta encendido o no!!
+;     ;jnz .pagina_presente
+    ;en este punto tengo en ebx la dir fisica de la tabla de paginas requerida!
+    mov eax,[.phys_mem_actual]; la nueva pagina se coloca en las siguientes posiciones de memoria!!
+    and eax,0xFFFFF000; limpio los 12LSb por las dudas, ya que la pagina debe estar en multiplo de 4k!!
+    or eax,0x03 ; seteo el bit de presente y Lectura/Escritura
+    mov [ebx+ecx*4], eax;cargo la entrada correspondiente de la tabla!!
+    add dword[.phys_mem_actual],0x1000; Incremento la posicion de memoria fisica actual en 4k!!
+    
     call clrscr
     
     push dword[atributos]
     push dword[fila]
     push dword[columna]
-    push msg_excep14
+    push .msg_pagina_alocada
     
     call print; 
+    jmp .fin_ok
+    
+    .pise_rom:
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push .msg_pise_rom
+    
+    call print; 
+    jmp .fin_error
+    
+    .pise_mem_cableada:
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push .msg_pise_mem_cableada
+    
+    call print; 
+    jmp .fin_error
+    
+    .pagina_presente:
+    
+    call clrscr
+    
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push .msg_pagina_presente
+    
+    call print; 
+    jmp .fin_ok
+    
+    
+    
+    .fin_error:
     hlt;
-        
+    popad
+    iret
+    
+    .fin_ok:
+    hlt
+    popad
     iret
     
 ;Se saltea la 15, es reservada
@@ -530,31 +635,27 @@ handler_excep30:
 ;--------------------------------------------------------------------------------
 ; Handlers de interrupciones
 ;--------------------------------------------------------------------------------
-handler_interr0: ;handler del timer    
+handler_interr0: ;handler del timer 
     pushad
-    pushfd
-    
+
     inc dword[sys_ticks]
     
     mov al, 0x20
     out 0x20,al ; Marco el EOI
     
-    popfd
     popad
     iret
     
     
 handler_interr1: ;handler del teclado!  
     pushad; pusheo los registros de proposito general
-    pushfd; pusheo los flags
-    
+
     in al, DATA_PORT_PS2 ;leo el valor de la tecla
     mov [scan_code_actual],al ;guardo el scan_code en la variable correspondiente
     
     mov al, 0x20
     out 0x20,al ; Marco el EOI
     
-    popfd
     popad
     
     iret
@@ -567,8 +668,7 @@ handler_interr3:
     
 handler_interr4: ;Interrupcion de puerto serie (COM1)
     pushad; pusheo los registros de proposito general
-    pushfd; pusheo los flags 
-    
+
     mov dx, 0x3F8+2;esta es la direccion del IIR para el COM1
     in al,dx ;leo el valor del registro IIR (interrupt identifier register)
     mov bl,al; paso al a bl
@@ -594,8 +694,7 @@ handler_interr4: ;Interrupcion de puerto serie (COM1)
     handler_interr4_fin:
     mov al, 0x20
     out 0x20,al ; Marco el EOI
-    
-    popfd
+
     popad
     
     iret

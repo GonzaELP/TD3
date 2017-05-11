@@ -86,6 +86,8 @@ GLOBAL 		Entry
 
 GLOBAL          IDT32
 
+GLOBAL          PAGE_DIR
+
 EXTERN		start32
 
 EXTERN          vect_handlers
@@ -93,25 +95,43 @@ EXTERN          vect_handlers
 EXTERN          __sys_tables_LMA
 EXTERN          __sys_tables_start
 EXTERN          __sys_tables_end
+EXTERN          __sys_tables_size
+EXTERN          __sys_tables_phy_addr
+
 EXTERN          __main_LMA
 EXTERN          __main_start
 EXTERN          __main_end
+EXTERN          __main_size
+EXTERN          __main_phy_addr
+
 EXTERN          __mdata_LMA
 EXTERN          __mdata_start
 EXTERN          __mdata_end
+EXTERN          __mdata_size
+EXTERN          __mdata_phy_addr
+
 EXTERN          __pag_tables_LMA
 EXTERN          __pag_tables_start
 EXTERN          __pag_tables_end
+EXTERN          __pag_tables_size
+
+
 EXTERN          __func_LMA
 EXTERN          __func_start
 EXTERN          __func_end
+EXTERN          __func_size
+EXTERN          __func_phy_addr
 
 EXTERN          __stack_LMA
 EXTERN          __stack_start
 EXTERN          __stack_end
+EXTERN          __stack_size
+EXTERN          __stack_phy_addr
 
 EXTERN          __bss_start
 EXTERN          __bss_end
+EXTERN          __bss_size
+EXTERN          __bss_phy_addr
 
 
 
@@ -137,71 +157,83 @@ SECTION 	.init
 start:									; Punto de entrada
 	INCBIN "init16.bin"					; Binario de 16 bits
 
-        
- 
- ;Saltar a Init32
+;Saltar a Init32
  
  
 ;;CODIGO AGREGADO POR GONZALO
     
-;Movimiento del codigo a los lugares que corresponda! los parametros los pasa el Linker Script
-    
-    
-    mov esi, __sys_tables_LMA
-    mov edi, __sys_tables_start
-    mov ecx, __sys_tables_end
-    sub ecx,__sys_tables_start ;calculo la longitud en memoria
-    rep movsb 
+;Movimiento del codigo correspondiente a las tablas de sistema usando los datos del linker script, lo debo hacer sin llamadas ya que no puedo usar el stack pointer hasta tanto no inicialice las estructuras!   
 
-    mov esi, __main_LMA
-    mov edi, __main_start
-    mov ecx, __main_end
-    sub ecx, __main_start ;calculo la longitud en memoria
-    rep movsb
-    
-    mov esi, __mdata_LMA
-    mov edi, __mdata_start
-    mov ecx, __mdata_end
-    sub ecx, __mdata_start ;calculo la longitud en memoria
+    mov esi, __sys_tables_LMA
+    mov edi, __sys_tables_phy_addr ;Muevo las tablas a su DIRECCION FISICA FINAL!!!!
+    mov ecx, __sys_tables_size
     rep movsb 
+ 
     
-    mov esi, __func_LMA
-    mov edi, __func_start
-    mov ecx, __func_end
-    sub ecx, __func_start ;calculo la longitud en memoria
-    rep movsb 
-    
-    mov edi, __stack_start
-    mov ecx, __stack_end
-    sub ecx, __stack_start
-    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
-    
-    xor eax,eax ;limpio el registro eax para que quede en cero
-    mov edi, __bss_start
-    mov ecx, __bss_end
-    sub ecx, __bss_start
-    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
-    
-;Inicializacion de la pila. ANTES QUE NADA DEBO INICIALIZAR LA PILA PARA LUEGO PODER LLAMAR FUNCIONES!!!!!!!!
+;Cargo la GDT DE MANERA PROVISORIA, ya que la tengo en memoria fisica, la tengo que cargar con la direccion de base de memoria fisica hasta habilitar la paginacion
+    mov eax,my_gdtr; muevo la parte del "Tamaño" a bx.
+    sub eax,__sys_tables_start ; le resto la direccion LINEAL de inicio (conozco su ofset dentro de la seccion)
+    add eax,__sys_tables_phy_addr; le sumo la direccion FISICA a la cual copie la ENTRADA DEL REGISTRO DE TABLA. De esta forma conozco la direccion final en ram.
+    ;En eax ya tengo la direccion donde esta ubicada my_gdtr en RAM, el problema es que la parte del gdtr copiado tiene aún la direccion base LINEAL original (erronea). Debo entonces modificar esa direccion base y cambiarla por la FISICA, para poder cargar el GDTR
+    lea ebx,[eax+2]; cargo la direccion en la que se encuentra el campo de base.
+    mov dword[ebx],__sys_tables_phy_addr; cargo en esa posicion la DIRECCION FISICA.
+    lgdt [eax]
+
+    xchg bx,bx    
+;Inicializacion de la pila para poder llamar funciones!!
     mov ax,SEL_DATOS
     mov ss,ax
-    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
+    mov eax,__stack_phy_addr
+    add eax,__stack_size
+    mov esp,eax ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)    
     
+;Movimiento del resto del codigo a los lugares que corresponda! los parametros los pasa el Linker Script       
+    push __main_size
+    push __main_LMA
+    push __main_phy_addr
+    call my_memcpy
+    add esp,3*4
     
-;Carga de la IDT
-    call InitIDT
+    push __func_size
+    push __func_LMA
+    push __func_phy_addr
+    call my_memcpy
+    add esp,3*4
+    
+    push __mdata_size
+    push __mdata_LMA
+    push __mdata_phy_addr
+    call my_memcpy
+    add esp,3*4
+    
+;Inicializo en cero las zonas de memoria dinamica    
+    xor eax,eax ;limpio el registro eax para que quede en cero
+    mov edi, __bss_phy_addr
+    mov ecx, __bss_size
+    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
+    
 
-;Carga de las tablas de sistema
-    lgdt [my_gdtr]
-    lidt [my_idtr] 
-
-    
-;Inicializo las tablas de PAGINACION!!
+    ;Inicializo las tablas de PAGINACION!!
     call InitTabPAG
     
     mov eax,CR0; cargo CR0 en eax
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
-    mov CR0,eax 
+    mov CR0,eax
+    
+;Una vez habilitada la paginacion, el procesador va a buscar my_gdtr y la va a traducir de memoria lineal a fisica... pero como en fisica tengo cargado
+;El valor de gdtr fisico, y debo en realidad guardar el lineal en el registro... entonces lo debo editar!.
+    mov dword[my_gdtr+2],__sys_tables_start; cargo la base con la direccion lineal!!
+    lgdt[my_gdtr]; cargo el registro GDTR
+    
+;Tambien debo recargar la pila!! ahora ya con las direcciones LINEALES
+    mov ax,SEL_DATOS
+    mov ss,ax
+    mov esp,__stack_end
+    
+;Carga de la IDT. LA DEBO CARGAR DESPUES DE LAS TABLAS DE PAGINAS YA QUE DISPONGO DE LAS DIRECCIONES LINEALES DE LOS HANDLERS por el linker script.
+    call InitIDT
+;Carga de las tablas de sistema
+    lidt [my_idtr] 
     
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -212,10 +244,10 @@ start:									; Punto de entrada
 ;Inicializacion del puerto serie
     call InitCOM1
     
+;Habilitacion de las interrupciones    
     sti
+
 ;Salto al main
-    
-  
     mov eax,start32 ;coloco en eax el offset del start
     push dword SEL_CODIGO ; Pusheo primero el selector de codigo
     push eax ;luego el offset
@@ -223,8 +255,6 @@ start:									; Punto de entrada
 
 
 ;;CODIGO AGREGADO POR GONZALO
-    
-    
     
 ;--------------------------------------------------------------------------------
 ; Inicializacion de la idt
@@ -237,7 +267,7 @@ InitIDT:
     cmp ecx, ebx; si ebx es cero, es porque no hay descriptores, no necesito cargar handlers
     je fin_carga_idt
 
-    xchg bx,bx
+    
 ;carga de la parte de excepciones de la IDT
 ciclo_carga_idt_excep:
     mov eax, [vect_handlers+4*ecx] ;cada handler es una etiqueta, estan espaciadas 4bytes en el vector
@@ -304,13 +334,23 @@ mov dword[PAGE_TABLE1+eax*4],0x000B8003; apunta la direccion fisica B8000!! la b
 mov eax, 0x00000 ; a partir de cuando necesito paginas.
 or eax, 0x03; prendo los ultimos 3 bits que van a quedar siempre encendidos por la configuracion de la pagina
 
-ciclo_InitPAG1:
+ciclo_InitPAG1_IM: ; en esta parte cargo las primeras 0x100000 direcciones que van con identity mapping para las tablas de paginas, memoria de video, etc
     mov ebx,eax;
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
     mov dword[PAGE_TABLE1+ebx*4],eax; cargo la entrada
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
-    cmp eax, 0x160000;
-    jb ciclo_InitPAG1; me voy si ya cargue todas las paginas!.
+    cmp eax, 0x100000; hasta esta direccion hago identity mapping
+    jb ciclo_InitPAG1_IM; me voy si ya cargue todas las paginas!.
+    
+ciclo_InitPAG1_NIM: ;en esta parte cargo lo que NO ES identy mapping. Es decir desde la 0x100000 hasta la 0x400000 (todo el resto de la primera pagina)
+    mov ebx,eax;
+    mov edx,eax;
+    add edx,0x100000; le sumo 0x100000 que es la diferencia entre las direcciones LINEALES y las FISICAS (Fisicas = Lineales + 0x100000 en este caso, por enunciado)
+    shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
+    mov dword[PAGE_TABLE1+ebx*4],edx; cargo la entrada
+    add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
+    cmp eax, 0x400000; hasta esta direccion hago identity mapping
+    jb ciclo_InitPAG1_NIM; me voy si ya cargue todas las paginas!.
     
 
 mov eax, 0xFFFF0000; a partir de esta direccion y hasta 0xFFFF FFFF quiero paginar, es decir 64k= 16 paginas     
@@ -331,6 +371,33 @@ mov eax, PAGE_DIR; cargo en eax la base del directorio de paginas
 mov CR3, eax; cargo CR3 con la base del directorio de paginas!!
 
 ret
+
+
+
+
+;--------------------------------------------------------------------------------
+;Rutina de copiado de codigo
+
+;void* my_memcpy(void * destination, void* source, uint size);
+; EIP de regreso: EBP+4
+; destination: EBP+8
+; source: EBP+12
+; size: EBP+16
+;--------------------------------------------------------------------------------
+my_memcpy:
+  
+  push ebp
+  mov ebp,esp
+  
+  mov esi, [ebp+12]
+  mov edi, [ebp+8]
+  mov ecx, [ebp+16]
+  rep movsb
+  
+  pop ebp
+
+ret
+
 
 ;--------------------------------------------------------------------------------
 ; Inicializacion del controlador de interrupciones
