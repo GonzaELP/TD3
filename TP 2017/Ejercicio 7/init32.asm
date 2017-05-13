@@ -87,6 +87,7 @@ GLOBAL 		Entry
 GLOBAL          IDT32
 
 GLOBAL          PAGE_DIR
+GLOBAL          PAGE_TABLES1_40
 
 EXTERN		start32
 
@@ -179,7 +180,6 @@ start:									; Punto de entrada
     mov dword[ebx],__sys_tables_phy_addr; cargo en esa posicion la DIRECCION FISICA.
     lgdt [eax]
 
-    xchg bx,bx    
 ;Inicializacion de la pila para poder llamar funciones!!
     mov ax,SEL_DATOS
     mov ss,ax
@@ -307,13 +307,13 @@ InitTabPAG:
  ;Debo mapear las paginas de la rom y el Vector de reset es decir desde 0xFFFF0000 a 0xFFFF FFFF (es decir los ultimos 64k = 16 paginas) de la ultima entrada del directorio!.
  
  ;La base de la tabla correspondiente a esta entrada del directorio es PAGE_TABLE1024, por lo tanto, los bits 31 a 12, deberan contener los primeros 20 bits de esta etiqueta.
- mov eax, PAGE_TABLE1024; como es una entrada de tabla de paginas, se suponen que los primeros 12 bits estan en cero!
+ mov eax, PAGE_TABLE1023; como es una entrada de tabla de paginas, se suponen que los primeros 12 bits estan en cero!
  or eax, 0x03; para que sea pagina presente y de lectura ecareyscritura
  mov dword[PAGE_DIR+1023*4],eax 
  
  
 ;Tambien debo mapear la memoria de video 0x000B 8000 y  de 0x0010 0000 a 0x0015 0000 todo esto corresponde a la primera entrada del directorio! que si hago identity mapping    ;abarcaria desde la direccion 0x0000 0000 hasta la direccion 0x0040 0000
-mov eax, PAGE_TABLE1
+mov eax, PAGE_TABLE0
 or eax,0x03
 mov dword[PAGE_DIR],eax ;  bit 0= 1 (presente), bit 1='1' (R/W) bit 7='1' (paginas grandes!!). Los bits 31 a 22 van en 0, ya que voy a mapear con identity mapping los primeros 4mb!!!
 
@@ -328,42 +328,42 @@ mov dword[PAGE_DIR],eax ;  bit 0= 1 (presente), bit 1='1' (R/W) bit 7='1' (pagin
 ;                      0x0015 0000 a 0x0040 0000 (fisicas) entradas entradas 337 a 1024 no presentes
 mov eax, 0xB8000; cargo eax con la direccion de video.
 shr eax, 12; shifteo 12 bits, que es lo mismo que dividir por 4096, esto me da 0xB8=184!
-mov dword[PAGE_TABLE1+eax*4],0x000B8003; apunta la direccion fisica B8000!! la base de la pagina!!
+mov dword[PAGE_TABLE0+eax*4],0x000B8003; apunta la direccion fisica B8000!! la base de la pagina!!
 
 
 mov eax, 0x00000 ; a partir de cuando necesito paginas.
 or eax, 0x03; prendo los ultimos 3 bits que van a quedar siempre encendidos por la configuracion de la pagina
 
-ciclo_InitPAG1_IM: ; en esta parte cargo las primeras 0x100000 direcciones que van con identity mapping para las tablas de paginas, memoria de video, etc
+ciclo_InitPAG0_IM: ; en esta parte cargo las primeras 0x100000 direcciones que van con identity mapping para las tablas de paginas, memoria de video, etc
     mov ebx,eax;
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
-    mov dword[PAGE_TABLE1+ebx*4],eax; cargo la entrada
+    mov dword[PAGE_TABLE0+ebx*4],eax; cargo la entrada
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
     cmp eax, 0x100000; hasta esta direccion hago identity mapping
-    jb ciclo_InitPAG1_IM; me voy si ya cargue todas las paginas!.
+    jb ciclo_InitPAG0_IM; me voy si ya cargue todas las paginas!.
     
-ciclo_InitPAG1_NIM: ;en esta parte cargo lo que NO ES identy mapping. Es decir desde la 0x100000 hasta la 0x400000 (todo el resto de la primera pagina)
+ciclo_InitPAG0_NIM: ;en esta parte cargo lo que NO ES identy mapping. Es decir desde la 0x100000 hasta la 0x400000 (todo el resto de la primera pagina)
     mov ebx,eax;
     mov edx,eax;
     add edx,0x100000; le sumo 0x100000 que es la diferencia entre las direcciones LINEALES y las FISICAS (Fisicas = Lineales + 0x100000 en este caso, por enunciado)
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
-    mov dword[PAGE_TABLE1+ebx*4],edx; cargo la entrada
+    mov dword[PAGE_TABLE0+ebx*4],edx; cargo la entrada
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
-    cmp eax, 0x400000; hasta esta direccion hago identity mapping
-    jb ciclo_InitPAG1_NIM; me voy si ya cargue todas las paginas!.
+    cmp eax, 0x400000; hasta esta direccion hago identity mapping. 0x400000 FISICA que es donde empiezan las nuevas paginas 
+    jb ciclo_InitPAG0_NIM; me voy si ya cargue todas las paginas!.
     
 
 mov eax, 0xFFFF0000; a partir de esta direccion y hasta 0xFFFF FFFF quiero paginar, es decir 64k= 16 paginas     
 or eax, 0x03
 
-ciclo_InitPAG1024:
+ciclo_InitPAG1023:
     mov ebx,eax;
     sub ebx, 1024*1023*4096; como es identity mapping la ultima entrada del directorio direccionara desde 1024*1023*4096 hasta 1024*1024*4096 o lo que es lo mismo decir, desde 0xFFC0 0000 a 0xFFFF FFFF. Le resto entonces 0xFFC0 0000 a 0xFFFF 0000
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096 para conocer finalmente el indice dentro de la tabla!
-    mov dword[PAGE_TABLE1024+ebx*4],eax; cargo la entrada
+    mov dword[PAGE_TABLE1023+ebx*4],eax; cargo la entrada
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
     cmp eax, 0xFFFFF003;
-    jne ciclo_InitPAG1024; me voy si ya cargue todas las paginas!.
+    jne ciclo_InitPAG1023; me voy si ya cargue todas las paginas!.
 
     
 fin_InitPAG:
@@ -566,11 +566,14 @@ PAGE_DIR:
     resd 1024; defino las 1024 entradas del directorio de paginas
 ;LENGTH_PAGE_DIR equ $-PAGE_DIR
 
-PAGE_TABLE1:
+PAGE_TABLE0:
     resd 1024; defino las 1024 entradas de la tabla de paginas!
 ;LENGHT_PAGE_TABLE1 equ $-PAGE_TABLE1
 
-PAGE_TABLE1024:
+PAGE_TABLES1_40:
+    resd 39*1024
+    
+PAGE_TABLE1023:
     resd 1024; defino las 1024 entradas de la tabla de paginas!
 ;LENGHT_PAGE_TABLE1024 equ $-PAGE_TABLE1024
 

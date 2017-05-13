@@ -54,6 +54,7 @@ GLOBAL          LENGTH_VECT_HANDLERS_INTERR
 
 EXTERN          IDT32
 EXTERN          PAGE_DIR
+EXTERN          PAGE_TABLES1_40
 
 ;********************************************************************************
 ; Datos
@@ -151,9 +152,21 @@ USE32
 SECTION  	.main 			progbits
 
 start32:
-        jmp 0xC0000000
-    espero_tecla: 
+        mov ecx,10 ; 10 ciclos
+        gen_random_mem:; generacion de direcciones aleatorias
+            call gen_random_addr32;genero una memoria aleatoria
+            mov dword[eax],0xFFFFFFFF
+        loop gen_random_mem
         
+    call clrscr
+    push dword[atributos]
+    push dword[fila]
+    push dword[columna]
+    push msg_inicio
+    call print; 
+    add esp,16; balo el esp los 4 push
+         
+    espero_tecla: 
         in al,0x40
         cmp dword[sys_ticks],10; si sys
         jae imprimir_incremental; salto si sys_tics >= 10
@@ -188,18 +201,14 @@ start32:
 
     push buffer_itoa
     push dword[entero_itoa]
-    
     call itoa
-    
     add esp,8;add esp,8; bajo el esp los 2 push
     
     push dword[atributos]
     push dword[fila_cuenta]
     push dword[columna_cuenta]
     push buffer_itoa
-    
     call print; 
-    
     add esp,16; balo el esp los 4 push
     
     mov dword[sys_ticks],0x00; blanqueo el sys_ticks
@@ -347,6 +356,11 @@ gen_random_addr32:
       mul dword [.semilla]
       add eax, 123456789
       mov [.semilla],eax
+      mov edx,0x10000000; quiero que el  maximo numero sea 0x1000000!!
+      sub edx,0x00400000; le resto 0x400000 ya que NO quiero direcciones lineales de la primera. 
+      mul edx; De esta manera generare un numero entre 0x00 y 0x0FC00000
+      add edx, 0x00400000; pero lo que yo quiero es entre 0x00400000 y 0x10000000, entonces le sumo 0x00400000
+      mov eax,edx; por abi 32 el retorno va en eax
     ret
 
 
@@ -494,13 +508,14 @@ handler_excep14:
     ;             edx = direccion lineal desplazada 22 bits. Es decir entrada del directorio de paginas
     ;             ecx = Entrada de la tabla de paginas (bits 21 a 12)
     
-    xchg bx,bx 
-    pushad
+    
     pop edx; popeo el codigo de error
+    
+    pushad
     
     jmp .alocar_pagina
     
-    .msg_pise_rom db "Excepcion 14: Fallo de pagina, intento de acceder a ROM!",0
+    .msg_pise_rom db "Excepcion 14: Fallo de pagina, intento de acceso fuera de rango",0
     .msg_pise_mem_cableada db "Excepcion 14: Fallo de pagina, intento fallido de acceso a memoria mapeada",0
     .msg_pagina_alocada db "Excepcion 14: Fallo de pagina, Pagina no presente, se asigno una pagina nueva",0
     .msg_pagina_presente db "Excepcion 14: Pagina PRESENTE, se debe a otra cosa...",0
@@ -516,10 +531,10 @@ handler_excep14:
     shr edx,22; si quiero saber a que entrada del DIRECTORIO pertenece, debo quedarme con los primeros 10 bits.
     mov ecx,eax;
     shr ecx,12; elimino los 12 bits menos significativos
-    and ecx, 0xFFC00; con esto elimino los 10 MSb, que corresponden al directorio y me quedo con la entrada de la TABLA
+    and ecx, 0x3FF; con esto elimino los 10 MSb, que corresponden al directorio y me quedo con la entrada de la TABLA
      
-    cmp eax, 0xFFFF0000 ;si intenta acceder a memoria por encima de esto.
-    ja .pise_rom
+    cmp eax, 0x10000000 ;pongo un limite a las direcciones virtuales, para no pisar las tablas de paginas que estan con identity mapping. Si excede esto se va
+    ja .fuera_de_rango
     
     cmp edx,0; si pertenece a la entrada 0...
     je .pise_mem_cableada
@@ -530,22 +545,23 @@ handler_excep14:
     jmp .cargar_tabla
  
     .tabla_no_presente:
-    mov ebx,[.phys_mem_actual]; cargo en ebx la memoria fisica actual. A medida que voy definiendo nuevas paginas se va llenando la memoria y aumenta este valor.
+    mov ebx,edx; cargo el indice dentro del directorio de paginas en ebx
+    shl ebx,12; multiplico por 4096 para obtener la posicion de memoria dentro de las multiples tablas de paginas!!!
+    lea ebx,[PAGE_TABLES1_40-4096+ebx]; cargo en ebx la memoria fisica correspondiente a la posicion en la tabla.
     and ebx, 0xFFFFF000; por las dudas borro los 12LSb, ya que tiene que quedar multiplo de 4k en memoria fisica!!.
     or ebx,0x03; le seteo los atributos en Lectura/Escritura y Presente
     mov [PAGE_DIR+edx*4],ebx; Cargo en la entrada del directorio que corresponda, la ubicacion fisica de la nueva tabla de paginas!.
-    add dword[.phys_mem_actual],0x1000; Incremento la posicion de memoria fisica actual en 4k!!!
     jmp .cargar_tabla
     
     .cargar_tabla:
-    mov ebx,[PAGE_DIR+edx*4]; obtengo la entrada del directorio en ebx
-    and ebx, 0xFFFFF000; borro los ultimos 3 bits, con esto me quedo con la direccion de memoria fisica de la tabla!!
-    ;test dword[ebx+ecx*4],0x01; compruebo si el bit de presente la pagina esta encendido o no!!
-;     ;jnz .pagina_presente
-    ;en este punto tengo en ebx la dir fisica de la tabla de paginas requerida!
+    mov ebx,edx
+    shl ebx,12
+    test dword[PAGE_TABLES1_40-4096+ebx],0x01; compruebo si el bit de presente la pagina esta encendido o no!!
+    jnz .pagina_presente
     mov eax,[.phys_mem_actual]; la nueva pagina se coloca en las siguientes posiciones de memoria!!
     and eax,0xFFFFF000; limpio los 12LSb por las dudas, ya que la pagina debe estar en multiplo de 4k!!
     or eax,0x03 ; seteo el bit de presente y Lectura/Escritura
+    lea ebx,[PAGE_TABLES1_40-4096+ebx]
     mov [ebx+ecx*4], eax;cargo la entrada correspondiente de la tabla!!
     add dword[.phys_mem_actual],0x1000; Incremento la posicion de memoria fisica actual en 4k!!
     
@@ -557,9 +573,10 @@ handler_excep14:
     push .msg_pagina_alocada
     
     call print; 
+    add esp,16
     jmp .fin_ok
     
-    .pise_rom:
+    .fuera_de_rango:
     
     call clrscr
     
@@ -569,6 +586,7 @@ handler_excep14:
     push .msg_pise_rom
     
     call print; 
+    add esp,16
     jmp .fin_error
     
     .pise_mem_cableada:
@@ -580,7 +598,8 @@ handler_excep14:
     push dword[columna]
     push .msg_pise_mem_cableada
     
-    call print; 
+    call print;
+    add esp,16
     jmp .fin_error
     
     .pagina_presente:
@@ -592,10 +611,9 @@ handler_excep14:
     push dword[columna]
     push .msg_pagina_presente
     
-    call print; 
+    call print;
+    add esp,16
     jmp .fin_ok
-    
-    
     
     .fin_error:
     hlt;
@@ -603,7 +621,6 @@ handler_excep14:
     iret
     
     .fin_ok:
-    hlt
     popad
     iret
     
