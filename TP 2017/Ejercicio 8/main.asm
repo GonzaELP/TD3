@@ -53,7 +53,7 @@ GLOBAL          LENGTH_VECT_HANDLERS_EXCEP
 GLOBAL          LENGTH_VECT_HANDLERS_INTERR
 
 EXTERN          IDT32
-EXTERN          PAGE_DIR_SO_SO
+EXTERN          PAGE_DIR_SO
 EXTERN          PAGE_TABLES1_40_SO
 
 ;********************************************************************************

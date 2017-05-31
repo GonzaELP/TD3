@@ -36,14 +36,48 @@ SECTIONS
         __sys_tables_size = SIZEOF(.tables);
         __sys_tables_phy_addr = 0x00200000;
    
-		
-        .stack 0x00160000 :
-		{ __stack_start = . ; 
-		*(.stack);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
-		__stack_end = . ;} 
-	__stack_size = SIZEOF(.stack);	
-	__stack_phy_addr = 0x00260000;
+        .tss :
+        {
+            __tss_start = .;
+            *(.tss);
+            __tss_end = . ;
+        }
+        __tss_size = SIZEOF(.tss);
         
+          /*PILAS DE LAS TAREAS*/
+        .task1_stack 0x00150000 :
+		{ __task1_stack_start = . ; 
+		*(.task1_stack);        
+		__task1_stack_end = . ;} 
+	__task1_stack_size = SIZEOF(.task1_stack);	
+	__task1_stack_phy_addr = 0x00250000;
+	
+        .task2_stack 0x00150000 :
+		{ __task2_stack_start = . ; 
+		*(.task2_stack);        
+		__task2_stack_end = . ;} 
+	__task2_stack_size = SIZEOF(.task2_stack);	
+	__task2_stack_phy_addr = 0x002507FF;
+	
+	 .task3_stack 0x00150000 :
+		{ __task3_stack_start = . ; 
+		*(.task3_stack);        
+		__task3_stack_end = . ;} 
+	__task3_stack_size = SIZEOF(.task3_stack);	
+	__task3_stack_phy_addr = 0x00251000;
+        
+   
+	/*PILA DEL SISTEMA OPERATIVO*/	
+        .stack_so 0x00160000 :
+		{ __stack_so_start = . ; 
+		*(.stack_so);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
+		__stack_so_end = . ;} 
+	__stack_so_size = SIZEOF(.stack_so);	
+	__stack_so_phy_addr = 0x00260000;
+        
+        
+        
+        /*SECCION MAIN*/
         . = 0x00170000; 							/* location counter = VMA */
 	__main_start = . ;							/* VMA del punto de entrada 1Mb */
 	.main :										/* seccion de salida */
@@ -84,70 +118,46 @@ SECTIONS
 	
 	
 	
-	
 	/*CODIGO DE LAS TAREAS*/
-	
-	.=0x01800000;
-	__task1_code_start=.;
-	.task1_code:
+	. = 0x01800000;
+	__task1_code_start = .;
+	.task1_code :
 	AT( LOADADDR(.func) + SIZEOF(.func) )
             {
                 __task1_code_LMA = LOADADDR (.task1_code);
                 *(.task1_code);
-                __task1_code_end = .
+                __task1_code_end = .;
             }
         __task1_code_size = SIZEOF(.task1_code);
         __task1_code_phy_addr = 0x2800000;
             
        
-        .=0x01800000;
-	__task2_code_start=.;
-	.task2_code:
+        . = 0x01800000;
+	__task2_code_start = .;
+	.task2_code :
 	AT( LOADADDR(.task1_code) + SIZEOF(.task1_code) )
             {
                 __task2_code_LMA = LOADADDR (.task2_code);
                 *(.task2_code);
-                __task2_code_end = .
+                __task2_code_end = .;
             }
         __task2_code_size = SIZEOF(.task2_code);
         __task2_code_phy_addr = 0x28007FF;
         
         
-        .=0x01800000;
-	__task3_code_start=.;
-	.task3_code:
+        . = 0x01800000;
+	__task3_code_start = .;
+	.task3_code :
 	AT( LOADADDR(.task2_code) + SIZEOF(.task2_code) )
             {
                 __task3_code_LMA = LOADADDR (.task3_code);
                 *(.task3_code);
-                __task3_code_end = .
+                __task3_code_end = .;
             }
         __task3_code_size = SIZEOF(.task3_code);
         __task3_code_phy_addr = 0x2801000;
         
         
-        /*PILAS DE LAS TAREAS*/
-        
-            .task1_stack 0x00150000 :
-		{ __task1_stack_start = . ; 
-		*(.task1_stack);        
-		__task1_stack_end = . ;} 
-	__task1_stack_size = SIZEOF(.task1_stack);	
-	__task1_stack_phy_addr = 0x00250000;
-	
-	 .task2_stack 0x00150000 :
-		{ __task2_stack_start = . ; 
-		*(.task2_stack);        
-		__task2_stack_end = . ;} 
-	__task2_stack_size = SIZEOF(.task2_stack);	
-	__task2_stack_phy_addr = 0x002507FF;
-	
-	 .task3_stack 0x00150000 :
-		{ __task3_stack_start = . ; 
-		*(.task3_stack);        
-		__task3_stack_end = . ;} 
-	__task3_stack_size = SIZEOF(.task3_stack);	
-	__task3_stack_phy_addr = 0x00251000;
-        
+      
 
 }

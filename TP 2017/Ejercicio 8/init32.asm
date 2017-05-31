@@ -80,6 +80,8 @@
 %define LENGTH_VECT_HANDLERS_INTERR 16*4
 
 
+%define LONG_TSS 104
+
 ;********************************************************************************
 ; Simbolos externos y globales
 ;********************************************************************************
@@ -124,11 +126,10 @@ EXTERN          __func_end
 EXTERN          __func_size
 EXTERN          __func_phy_addr
 
-EXTERN          __stack_LMA
-EXTERN          __stack_start
-EXTERN          __stack_end
-EXTERN          __stack_size
-EXTERN          __stack_phy_addr
+EXTERN          __stack_so_start
+EXTERN          __stack_so_end
+EXTERN          __stack_so_size
+EXTERN          __stack_so_phy_addr
 
 EXTERN          __bss_start
 EXTERN          __bss_end
@@ -201,8 +202,8 @@ start:									; Punto de entrada
 ;Inicializacion de la pila para poder llamar funciones!!
     mov ax,SEL_DATOS
     mov ss,ax
-    mov eax,__stack_phy_addr
-    add eax,__stack_size
+    mov eax,__stack_so_phy_addr
+    add eax,__stack_so_size
     mov esp,eax ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)    
     
 ;Movimiento del resto del codigo a los lugares que corresponda! los parametros los pasa el Linker Script       
@@ -265,12 +266,15 @@ start:									; Punto de entrada
 ;Tambien debo recargar la pila!! ahora ya con las direcciones LINEALES
     mov ax,SEL_DATOS
     mov ss,ax
-    mov esp,__stack_end
+    mov esp,__stack_so_end
     
 ;Carga de la IDT. LA DEBO CARGAR DESPUES DE LAS TABLAS DE PAGINAS YA QUE DISPONGO DE LAS DIRECCIONES LINEALES DE LOS HANDLERS por el linker script.
     call InitIDT
 ;Carga de las tablas de sistema
     lidt [my_idtr] 
+    
+    
+    
     
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -292,7 +296,17 @@ start:									; Punto de entrada
 
 
 ;;CODIGO AGREGADO POR GONZALO
-    
+
+
+;--------------------------------------------------------------------------------
+; Inicializacion de la idt
+;--------------------------------------------------------------------------------
+
+
+
+
+
+
 ;--------------------------------------------------------------------------------
 ; Inicializacion de la idt
 ;--------------------------------------------------------------------------------
@@ -575,21 +589,21 @@ SEL_DATOS equ $-GDT32
 
 SEL_TASK1 equ $-GDT32
     dw LONG_TSS-1
-    dw tss_task1
+    dw 0x00
     db 0x00
     db 0x89
     dw 0x00
 
 SEL_TASK2 equ $-GDT32
     dw LONG_TSS-1
-    dw tss_task2
+    dw 0x00
     db 0x00
     db 0x89
     dw 0x00
     
 SEL_TASK3 equ $-GDT32
     dw LONG_TSS-1
-    dw tss_task3
+    dw 0x00
     db 0x00
     db 0x89 ; COMIENZA DESOCUPADO
     dw 0x00
@@ -613,6 +627,10 @@ resq LENGTH_VECT_HANDLERS_INTERR
 LENGTH_IDT equ $-IDT32
 
 
+
+;--------------------------------------------------------------------------------
+; PILAS DE S.O. Y TAREAS.
+;--------------------------------------------------------------------------------
 SECTION     .stack_so nobits
 resd STACK_SIZE_SO
 
@@ -625,6 +643,22 @@ resd STACK_SIZE_TAREAS
 SECTION     .task3_stack nobits
 resd STACK_SIZE_TAREAS
 
+;--------------------------------------------------------------------------------
+; TSS's
+;--------------------------------------------------------------------------------
+SECTION .tss nobits
+
+tss_task1:
+    resd LONG_TSS
+tss_task2:
+    resd LONG_TSS
+tss_task3:
+    resd LONG_TSS
+
+
+;--------------------------------------------------------------------------------
+; TABLAS Y DIRECTORIOS DE PAGINAS
+;--------------------------------------------------------------------------------
 SECTION		.pag_tables nobits ; VA NO BITS PARA LOS DATOS NO INICIALIZADOS!!!!
 PAGE_DIR_SO:
     resd 1024
