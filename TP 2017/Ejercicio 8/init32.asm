@@ -425,6 +425,67 @@ ret
 
 
 
+;--------------------------------------------------------------------------------
+; Inicializacion de las tablas de paginacion de las TAREAS!
+;--------------------------------------------------------------------------------
+InitPag_Tasks:
+;Carga de los directorios de páginas
+    mov eax,PAGE_TABLE0_TASK1;
+    or eax,0x03; presente y lectura escritura
+    mov [PAGE_DIR_TASK1+4*0],eax
+    mov eax, PAGE_TABLE5_TASK1;
+    or eax, 0x03;
+    mov [PAGE_DIR_TASK1+4*5],eax
+    
+    mov eax,PAGE_TABLE0_TASK2;
+    or eax,0x03; presente y lectura escritura
+    mov [PAGE_DIR_TASK2+4*0],eax
+    mov eax, PAGE_TABLE5_TASK2;
+    or eax, 0x03;
+    mov [PAGE_DIR_TASK2+4*5],eax
+    
+    mov eax,PAGE_TABLE0_TASK3;
+    or eax,0x03; presente y lectura escritura
+    mov [PAGE_DIR_TASK3+4*0],eax
+    mov eax, PAGE_TABLE5_TASK3;
+    or eax, 0x03;
+    mov [PAGE_DIR_TASK3+4*5],eax
+
+;Carga de las tablas de páginas
+   ;ANTES QUE NADA LIMPIO TODAS LAS TABLAS DE PAGINAS
+   mov ecx,1024
+
+.loop_clean_pages:
+
+loop
+   
+   mov eax, __task1_code_start
+   mov ebx 0x400000
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task1_code_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE5_TASK1+edx*4],eax;
+   
+   mov eax, __task2_code_start
+   mov ebx 0x400000
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task2_code_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE5_TASK2+edx*4],eax;
+   
+   mov eax, __task3_code_start
+   mov ebx 0x400000
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task3_code_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE5_TASK3+edx*4],eax;
+   
 
 ;--------------------------------------------------------------------------------
 ;Rutina de copiado de codigo

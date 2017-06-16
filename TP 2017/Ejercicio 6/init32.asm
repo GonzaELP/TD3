@@ -199,9 +199,13 @@ start:									; Punto de entrada
 ;Inicializo las tablas de PAGINACION!!
     call InitTabPAG
     
+    xchg bx,bx
     mov eax,CR0; cargo CR0 en eax
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
-    mov CR0,eax 
+    mov CR0,eax
+    
+    xchg bx,bx
+    mov ax,ax
     
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -237,7 +241,7 @@ InitIDT:
     cmp ecx, ebx; si ebx es cero, es porque no hay descriptores, no necesito cargar handlers
     je fin_carga_idt
 
-    xchg bx,bx
+
 ;carga de la parte de excepciones de la IDT
 ciclo_carga_idt_excep:
     mov eax, [vect_handlers+4*ecx] ;cada handler es una etiqueta, estan espaciadas 4bytes en el vector
@@ -269,65 +273,83 @@ ciclo_carga_idt_interr:
 fin_carga_idt:
     ret
 
-;--------------------------------------------------------------------------------
+;********************************************************************************
 ; Inicializacion de las tablas de paginacion!
-;--------------------------------------------------------------------------------
+;*********************************************************************************
 InitTabPAG:
  ;Busco hacer identity mapping, direcciones lineales se corresponden con las fisicas, ahora uso paginas de 4k
  ;Debo mapear las paginas de la rom y el Vector de reset es decir desde 0xFFFF0000 a 0xFFFF FFFF (es decir los ultimos 64k = 16 paginas) de la ultima entrada del directorio!.
+ ;Para ello lo primero que debo hacer es cargar 
+
  
- ;La base de la tabla correspondiente a esta entrada del directorio es PAGE_TABLE1024, por lo tanto, los bits 31 a 12, deberan contener los primeros 20 bits de esta etiqueta.
- mov eax, PAGE_TABLE1024; como es una entrada de tabla de paginas, se suponen que los primeros 12 bits estan en cero!
- or eax, 0x03; para que sea pagina presente y de lectura ecareyscritura
- mov dword[PAGE_DIR+1023*4],eax 
+xchg bx,bx
+; CARGA DEL LA TABLA DE PUNTEROS A DIRECTORIOS DE PAGINAS
+;Cargo la entrada del puntero a directorio de paginas 0. Para direccionar de 0x00000000 a 0x00200000
+ mov eax,PAGE_DIR0
+ or eax, 0x01 ;entrada del directorio presente. NO VA W/R!!!. 
+ mov dword[PAGE_DIR_POINTER_TABLE+0*8],eax
+ mov dword[PAGE_DIR_POINTER_TABLE+0*8+4],0x00;
  
+;Cargo la entrada del puntero a directorio de paginas 4. Para direccionar de 0xFFFF0000 a 0xFFFFFFFF
+ mov eax,PAGE_DIR3
+ or eax,0x01 ;entrada del directorio presente. NO VA W/R!!!. 
+ mov dword[PAGE_DIR_POINTER_TABLE+3*8],eax
+ mov dword[PAGE_DIR_POINTER_TABLE+3*8+4],0x00;
  
-;Tambien debo mapear la memoria de video 0x000B 8000 y  de 0x0010 0000 a 0x0015 0000 todo esto corresponde a la primera entrada del directorio! que si hago identity mapping    ;abarcaria desde la direccion 0x0000 0000 hasta la direccion 0x0040 0000
-mov eax, PAGE_TABLE1
-or eax,0x03
-mov dword[PAGE_DIR],eax ;  bit 0= 1 (presente), bit 1='1' (R/W) bit 7='1' (paginas grandes!!). Los bits 31 a 22 van en 0, ya que voy a mapear con identity mapping los primeros 4mb!!!
+
+;CARGA DE LOS DIRECTORIOS DE PAGINAS
+
+;Cargo la entrada 511 del directorio 3, para direccionar de 0xFFFF0000 a 0xFFFFFFFF
+ mov eax, PAGE_TABLE3_511
+ or eax, 0x03
+ mov dword[PAGE_DIR3+511*8],eax;
+ mov dword[PAGE_DIR3+511*8+4],0x00
+ 
+;Cargo la entrada 0 del directorio 0, para direccionar de 0x00000000 a 0x00200000
+ mov eax, PAGE_TABLE0_0
+ or eax, 0x03
+ mov dword[PAGE_DIR0+0*8],eax;
+ mov dword[PAGE_DIR0+0*8+4],0x00
 
 
-;Inicializacion de las tablas de paginas.
+;CARGA DE LAS TABLAS DE PAGINAS
 
-;Paginas page table 1: 0x0000 0000 a 0x0000 1000 (fisicas) entrada 1, no presente
-;                      0x0000 1000 a 0x000B 8000 (fisicas) entradas 2 a 184 inclusive, no presentes
-;                      0x0000 B800 a 0x000B 9000 (fisicas) entrada 185, presente! memoria de video.
-;                      0x0000 B900 a 0x0010 0000 (fisicas) entrada 186 a 256 no presentes!
-;                      0x0010 0000 a 0x0015 0000 (fisicas) entradas 257 a 336 presentes para el codigo.
-;                      0x0015 0000 a 0x0040 0000 (fisicas) entradas entradas 337 a 1024 no presentes
-mov eax, 0xB8000; cargo eax con la direccion de video.
-shr eax, 12; shifteo 12 bits, que es lo mismo que dividir por 4096, esto me da 0xB8=184!
-mov dword[PAGE_TABLE1+eax*4],0x000B8003; apunta la direccion fisica B8000!! la base de la pagina!!
+;Cargo todas las entradas de la tabla 0 del directorio 0 para hacer identity mapping de las direcciones 0x00000000 a 0x00200000
+mov eax, 0x00000000; a partir de aqui necesito paginas
+or eax, 0x03; prendo lo ultimos 3 bits que van a quedar siempre encendidos por la configuracion de la pagina
 
-
-mov eax, 0x00000 ; a partir de cuando necesito paginas.
-or eax, 0x03; prendo los ultimos 3 bits que van a quedar siempre encendidos por la configuracion de la pagina
-
-ciclo_InitPAG1:
+ciclo_InitPAG0_0:
     mov ebx,eax;
-    shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096
-    mov dword[PAGE_TABLE1+ebx*4],eax; cargo la entrada
-    add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
-    cmp eax, 0x160000;
-    jb ciclo_InitPAG1; me voy si ya cargue todas las paginas!.
-    
-
+    shr ebx, 12 ; shifteo 12 bits, es decir divido por 0x1000 = 4096
+    mov dword[PAGE_TABLE0_0+ebx*8],eax; cargo la entrada
+    mov dword[PAGE_TABLE0_0+ebx*8+4],0x00;
+    add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x00200000 
+    cmp eax, 0x00200000;
+jb ciclo_InitPAG0_0; me voy si ya cargue todas las paginas!.
+ 
+ 
+;Cargo las entradas de la tabla 511 del directorio 3 NECESARIAS para hacer identity mapping de las direcciones 0xFFFF0000 a 0xFFFFFFFF
 mov eax, 0xFFFF0000; a partir de esta direccion y hasta 0xFFFF FFFF quiero paginar, es decir 64k= 16 paginas     
 or eax, 0x03
 
-ciclo_InitPAG1024:
+ciclo_InitPAG3_511:
     mov ebx,eax;
-    sub ebx, 1024*1023*4096; como es identity mapping la ultima entrada del directorio direccionara desde 1024*1023*4096 hasta 1024*1024*4096 o lo que es lo mismo decir, desde 0xFFC0 0000 a 0xFFFF FFFF. Le resto entonces 0xFFC0 0000 a 0xFFFF 0000
+    sub ebx,0xFFFFFFFF-0x00200000 ;como es identity mapping la ultima entrada del directorio direccionara desde (0xFFFFFFFF-0x002000000)=0xFFDFFFFF hasta 0xFFFFFFFF
     shr ebx, 12; shifteo 12 bits, es decir divido por 0x1000 = 4096 para conocer finalmente el indice dentro de la tabla!
-    mov dword[PAGE_TABLE1024+ebx*4],eax; cargo la entrada
+    mov dword[PAGE_TABLE3_511+ebx*8],eax; cargo la entrada
+    mov dword[PAGE_TABLE3_511+ebx*8+4],0x00
     add eax, 0x1000; le sumo a eax 0x1000 es decir, empezara en 0x100003 luego 0x101003 y asi... hasta la ultima pagina que terminara en 0x150000 
     cmp eax, 0xFFFFF003;
-    jne ciclo_InitPAG1024; me voy si ya cargue todas las paginas!.
+jne ciclo_InitPAG3_511; me voy si ya cargue todas las paginas!.
 
     
 fin_InitPAG:
-mov eax, PAGE_DIR; cargo en eax la base del directorio de paginas
+
+mov eax, CR4
+or eax, (0x01<<0x05); enciendo el BIT 5 de CR4 (para habilitar PAE)
+mov CR4,eax
+
+mov eax, PAGE_DIR_POINTER_TABLE; cargo en eax la base del directorio de paginas
 mov CR3, eax; cargo CR3 con la base del directorio de paginas!!
 
 ret
@@ -495,17 +517,22 @@ resd STACK_SIZE
 
 SECTION		.pag_tables nobits ; VA NO BITS PARA LOS DATOS NO INICIALIZADOS!!!!
 
-PAGE_DIR:
-    resd 1024; defino las 1024 entradas del directorio de paginas
-;LENGTH_PAGE_DIR equ $-PAGE_DIR
+PAGE_DIR0:
+    resd 1024 ;defino las 1024 entradas del directorio de paginas
 
-PAGE_TABLE1:
+PAGE_DIR3:
+    resd 1024
+
+PAGE_TABLE0_0:
     resd 1024; defino las 1024 entradas de la tabla de paginas!
 ;LENGHT_PAGE_TABLE1 equ $-PAGE_TABLE1
 
-PAGE_TABLE1024:
+PAGE_TABLE3_511:
     resd 1024; defino las 1024 entradas de la tabla de paginas!
 ;LENGHT_PAGE_TABLE1024 equ $-PAGE_TABLE1024
+
+PAGE_DIR_POINTER_TABLE:
+    resd 8; defino las 4 entradas del puntero a directorios de paginas, PARA PAE
 
 
 

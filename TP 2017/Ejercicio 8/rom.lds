@@ -57,14 +57,14 @@ SECTIONS
 		*(.task2_stack);        
 		__task2_stack_end = . ;} 
 	__task2_stack_size = SIZEOF(.task2_stack);	
-	__task2_stack_phy_addr = 0x002507FF;
+	__task2_stack_phy_addr = 0x00251000;
 	
 	 .task3_stack 0x00150000 :
 		{ __task3_stack_start = . ; 
 		*(.task3_stack);        
 		__task3_stack_end = . ;} 
 	__task3_stack_size = SIZEOF(.task3_stack);	
-	__task3_stack_phy_addr = 0x00251000;
+	__task3_stack_phy_addr = 0x00252000;
         
    
 	/*PILA DEL SISTEMA OPERATIVO*/	
@@ -142,7 +142,7 @@ SECTIONS
                 __task2_code_end = .;
             }
         __task2_code_size = SIZEOF(.task2_code);
-        __task2_code_phy_addr = 0x28007FF;
+        __task2_code_phy_addr = 0x2801000;
         
         
         . = 0x01800000;
@@ -155,7 +155,7 @@ SECTIONS
                 __task3_code_end = .;
             }
         __task3_code_size = SIZEOF(.task3_code);
-        __task3_code_phy_addr = 0x2801000;
+        __task3_code_phy_addr = 0x2802000;
         
         
       
