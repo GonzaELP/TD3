@@ -41,22 +41,22 @@
 
 
 ;Defines multitasking.
-%define SC_MAKE_A
-%define SC_MAKE_B
-%define SC_MAKE_C
+%define SC_MAKE_A 0x1E 
+%define SC_MAKE_B 0x30
+%define SC_MAKE_C 0x2E
 
-%define SC_BREAK_A
-%define SC_BREAK_B
-%define SC_BREAK_C
+%define SC_BREAK_A (SC_MAKE_A+0x80)
+%define SC_BREAK_B (SC_MAKE_B+0x80)
+%define SC_BREAK_C (SC_MAKE_C+0x80)
 
-%define COUNT_T1_X
-%define COUNT_T1_Y
+%define COUNT_T1_X 68
+%define COUNT_T1_Y 0x00
 
-%define COUNT_T2_X
-%define COUNT_T2_Y
+%define COUNT_T2_X 68
+%define COUNT_T2_Y 0x01
 
-%define COUNT_T3_X
-%define COUNT_T3_Y
+%define COUNT_T3_X 68
+%define COUNT_T3_Y 0x02
 
 ;--------------------------------------------------------------------------------
 ; Simbolos externos
@@ -175,9 +175,9 @@ msg_excep13 db "Excepcion 13, fallo general de proteccion",0
 
 msg_excep14 db "Excepcion 14, fallo de pagina",0
 
-msg_task1 db "Tarea 1 ejecutandose",0
-msg_task2 db "Tarea 2 ejecutandose",0
-msg_task3 db "Tarea 3 ejecutandose",0
+msg_task1 db "Tarea 1 ejecutandose, Cantidad de veces que se presiono la letra A:",0
+msg_task2 db "Tarea 2 ejecutandose, Cantidad de veces que se presiono la letra B:",0
+msg_task3 db "Tarea 3 ejecutandose, Cantidad de veces que se presiono la letra C:",0
 
 task_init:
     db 0x00
@@ -224,60 +224,112 @@ kernel_idle:
 ;********************************************************************************	
 SECTION .task1_code progbits
 task1:
+    cmp byte[.task1_init],0x00 ; no se inició todavía
+    jne .normal_t1
+    
+    push dword[atributos]
+    push COUNT_T1_Y
+    push dword[columna]
+    push msg_task1
+    call print
+    add esp,16
+    mov byte[.task1_init],0x01
+    
+    .normal_t1:
+    cmp byte[scan_code_actual],SC_BREAK_A
+    jne .fin
+    
+    inc dword[.task1_count] ; incremento la variable que cuenta las pulsadas
+    mov byte[scan_code_actual],0x00; limpio el scan_code_actual
     push .buffer_itoa_t1
     push dword[.task1_count]
     call itoa
     add esp,8;add esp,8; bajo el esp los 2 push
 
     push dword[atributos]
-    push 0x00
-    push dword[columna]
+    push COUNT_T1_Y
+    push COUNT_T1_X
     push .buffer_itoa_t1
     call print; 
     add esp,16; balo el esp los 4 push
-    inc dword[.task1_count]
-    nop
+    .fin:
+    hlt
 jmp task1
-
+.task1_init db 0x00
 .task1_count dd 0x00
 .buffer_itoa_t1 times 11 db 0x00
 
 SECTION .task2_code progbits
 task2:
+    cmp byte[.task2_init],0x00 ; no se inició todavía
+    jne .normal_t2
+    
+    push dword[atributos]
+    push COUNT_T2_Y
+    push dword[columna]
+    push msg_task2
+    call print
+    add esp,16
+    mov byte[.task2_init],0x01
+    
+    .normal_t2:
+    cmp byte[scan_code_actual],SC_BREAK_B
+    jne .fin
+    
+    inc dword[.task2_count] ; incremento la variable que cuenta las pulsadas
+    mov byte[scan_code_actual],0x00; limpio el scan_code_actual
     push .buffer_itoa_t2
     push dword[.task2_count]
     call itoa
     add esp,8;add esp,8; bajo el esp los 2 push
-    
+
     push dword[atributos]
-    push 0x01
-    push dword[columna]
+    push COUNT_T2_Y
+    push COUNT_T2_X
     push .buffer_itoa_t2
     call print; 
     add esp,16; balo el esp los 4 push
-    inc dword[.task2_count]
-    nop
+    .fin:
+    hlt
 jmp task2
+.task2_init db 0x00
 .task2_count dd 0x00
 .buffer_itoa_t2 times 11 db 0x00
 
 SECTION .task3_code progbits
 task3:
+    cmp byte[.task3_init],0x00 ; no se inició todavía
+    jne .normal_t3
+    
+    push dword[atributos]
+    push COUNT_T3_Y
+    push dword[columna]
+    push msg_task3
+    call print
+    add esp,16
+    mov byte[.task3_init],0x01
+    
+    .normal_t3:
+    cmp byte[scan_code_actual],SC_BREAK_C
+    jne .fin
+    
+    inc dword[.task3_count] ; incremento la variable que cuenta las pulsadas
+    mov byte[scan_code_actual],0x00; limpio el scan_code_actual
     push .buffer_itoa_t3
     push dword[.task3_count]
     call itoa
     add esp,8;add esp,8; bajo el esp los 2 push
-    
+
     push dword[atributos]
-    push 0x02
-    push dword[columna]
+    push COUNT_T3_Y
+    push COUNT_T3_X
     push .buffer_itoa_t3
     call print; 
     add esp,16; balo el esp los 4 push
-    inc dword[.task3_count]
-    nop
+    .fin:
+    hlt
 jmp task3
-
+.task3_init db 0x00
 .task3_count dd 0x00
 .buffer_itoa_t3 times 11 db 0x00
 
@@ -757,7 +809,7 @@ handler_interr0: ;handler del timer
     iret ; salto al inicio de la tarea
     
     .task_switch: ;aca va a empezar a entrar una vez que se hayan inicializado todas las tareas
-    xchg bx,bx
+    ;xchg bx,bx
     ;SALVO EL CONTEXTO DE LA TAREA QUE VENIA CORRIENDO
     push eax ; pusheo el valor de eax para resguardarlo
     mov eax,dword[.task_actual]
