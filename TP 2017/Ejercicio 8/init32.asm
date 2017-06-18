@@ -136,6 +136,7 @@ EXTERN          __bss_end
 EXTERN          __bss_size
 EXTERN          __bss_phy_addr
 
+;EXTERNS PARA EL CODIGO DE LAS TAREAS
 EXTERN          __task1_code_LMA
 EXTERN          __task1_code_start
 EXTERN          __task1_code_end
@@ -153,6 +154,22 @@ EXTERN          __task3_code_start
 EXTERN          __task3_code_end
 EXTERN          __task3_code_size
 EXTERN          __task3_code_phy_addr
+
+;EXTERNS PARA LAS PILAS DE LAS TAREAS
+EXTERN          __task1_stack_start 
+EXTERN          __task1_stack_end 
+EXTERN          __task1_stack_size	
+EXTERN          __task1_stack_phy_addr
+
+EXTERN          __task2_stack_start 
+EXTERN          __task2_stack_end 
+EXTERN          __task2_stack_size	
+EXTERN          __task2_stack_phy_addr
+
+EXTERN          __task3_stack_start 
+EXTERN          __task3_stack_end 
+EXTERN          __task3_stack_size	
+EXTERN          __task3_stack_phy_addr
 
 
 ;********************************************************************************
@@ -253,6 +270,7 @@ start:									; Punto de entrada
 
     ;Inicializo las tablas de PAGINACION!!
     call InitTabPAG
+    call Init_Pag_Tasks
     
     mov eax,CR0; cargo CR0 en eax
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
@@ -272,9 +290,6 @@ start:									; Punto de entrada
     call InitIDT
 ;Carga de las tablas de sistema
     lidt [my_idtr] 
-    
-    
-    
     
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -296,16 +311,6 @@ start:									; Punto de entrada
 
 
 ;;CODIGO AGREGADO POR GONZALO
-
-
-;--------------------------------------------------------------------------------
-; Inicializacion de la idt
-;--------------------------------------------------------------------------------
-
-
-
-
-
 
 ;--------------------------------------------------------------------------------
 ; Inicializacion de la idt
@@ -428,7 +433,23 @@ ret
 ;--------------------------------------------------------------------------------
 ; Inicializacion de las tablas de paginacion de las TAREAS!
 ;--------------------------------------------------------------------------------
-InitPag_Tasks:
+Init_Pag_Tasks:
+
+;Limpio todas las tablas y directorios de páginas para dejar no presente todo salvo las que habilito.  
+    mov eax,0
+    mov ecx, 1024
+.loop_clean:
+    mov [PAGE_DIR_TASK1+ecx*4-1],eax
+    mov [PAGE_DIR_TASK2+ecx*4-1],eax
+    mov [PAGE_DIR_TASK3+ecx*4-1],eax
+    mov [PAGE_TABLE0_TASK1+ecx*4-1],eax
+    mov [PAGE_TABLE0_TASK2+ecx*4-1],eax
+    mov [PAGE_TABLE0_TASK3+ecx*4-1],eax
+    mov [PAGE_TABLE5_TASK1+ecx*4-1],eax
+    mov [PAGE_TABLE5_TASK2+ecx*4-1],eax
+    mov [PAGE_TABLE5_TASK3+ecx*4-1],eax
+loop .loop_clean
+
 ;Carga de los directorios de páginas
     mov eax,PAGE_TABLE0_TASK1;
     or eax,0x03; presente y lectura escritura
@@ -451,16 +472,21 @@ InitPag_Tasks:
     or eax, 0x03;
     mov [PAGE_DIR_TASK3+4*5],eax
 
-;Carga de las tablas de páginas
-   ;ANTES QUE NADA LIMPIO TODAS LAS TABLAS DE PAGINAS
-   mov ecx,1024
-
-.loop_clean_pages:
-
-loop
+;Carga de las tablas de páginas 
+;TAREA 1
+   mov eax, __task1_stack_start
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task1_stack_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE0_TASK1+edx*4],eax;
    
    mov eax, __task1_code_start
-   mov ebx 0x400000
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task1_code_phy_addr
@@ -468,17 +494,41 @@ loop
    or eax,0x03 ;presente y lectoescritura
    mov [PAGE_TABLE5_TASK1+edx*4],eax;
    
+;TAREA 2
+   mov eax, __task2_stack_start
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task2_stack_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE0_TASK1+edx*4],eax;
+   
    mov eax, __task2_code_start
-   mov ebx 0x400000
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task2_code_phy_addr
    shr eax,12
    or eax,0x03 ;presente y lectoescritura
    mov [PAGE_TABLE5_TASK2+edx*4],eax;
+
+;TAREA 3
+   mov eax, __task3_stack_start
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
+   div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
+   shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
+   mov eax, __task3_stack_phy_addr
+   shr eax,12
+   or eax,0x03 ;presente y lectoescritura
+   mov [PAGE_TABLE0_TASK1+edx*4],eax;
    
    mov eax, __task3_code_start
-   mov ebx 0x400000
+   mov ebx, 0x400000
+   xor edx,edx; limpio edx
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task3_code_phy_addr
@@ -486,6 +536,7 @@ loop
    or eax,0x03 ;presente y lectoescritura
    mov [PAGE_TABLE5_TASK3+edx*4],eax;
    
+ret
 
 ;--------------------------------------------------------------------------------
 ;Rutina de copiado de codigo
