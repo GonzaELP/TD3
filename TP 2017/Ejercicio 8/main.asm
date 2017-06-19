@@ -40,7 +40,23 @@
 %define DATA_PORT_PS2 0x60
 
 
+;Defines multitasking.
+%define SC_MAKE_A
+%define SC_MAKE_B
+%define SC_MAKE_C
 
+%define SC_BREAK_A
+%define SC_BREAK_B
+%define SC_BREAK_C
+
+%define COUNT_T1_X
+%define COUNT_T1_Y
+
+%define COUNT_T2_X
+%define COUNT_T2_Y
+
+%define COUNT_T3_X
+%define COUNT_T3_Y
 
 ;--------------------------------------------------------------------------------
 ; Simbolos externos
@@ -52,9 +68,26 @@ GLOBAL          vect_handlers
 GLOBAL          LENGTH_VECT_HANDLERS_EXCEP
 GLOBAL          LENGTH_VECT_HANDLERS_INTERR
 
+GLOBAL          kernel_idle
+    
+EXTERN          SEL_CODIGO
+
 EXTERN          IDT32
 EXTERN          PAGE_DIR_SO
 EXTERN          PAGE_TABLES1_40_SO
+
+EXTERN          PAGE_DIR_TASK1
+EXTERN          PAGE_DIR_TASK2
+EXTERN          PAGE_DIR_TASK3
+
+EXTERN          __task1_stack_end 
+EXTERN          __task2_stack_end 
+EXTERN          __task3_stack_end 
+
+EXTERN          task1_context
+EXTERN          task2_context
+EXTERN          task3_context
+
 
 ;********************************************************************************
 ; Datos
@@ -142,6 +175,35 @@ msg_excep13 db "Excepcion 13, fallo general de proteccion",0
 
 msg_excep14 db "Excepcion 14, fallo de pagina",0
 
+msg_task1 db "Tarea 1 ejecutandose",0
+msg_task2 db "Tarea 2 ejecutandose",0
+msg_task3 db "Tarea 3 ejecutandose",0
+
+task_init:
+    db 0x00
+    db 0x00
+    db 0x00
+    
+task_pds:
+    dd PAGE_DIR_TASK1
+    dd PAGE_DIR_TASK2
+    dd PAGE_DIR_TASK3
+
+task_stacks:
+    dd __task1_stack_end
+    dd __task2_stack_end
+    dd __task3_stack_end
+    
+task_list:
+    dd task1
+    dd task2
+    dd task3
+    
+task_contexts:
+    dd task1_context
+    dd task2_context
+    dd task3_context
+
 
 
 
@@ -151,87 +213,9 @@ USE32
 ;********************************************************************************
 SECTION  	.main 			progbits
 
-start32:
-        mov ecx,10 ; 10 ciclos
-        gen_random_mem:; generacion de direcciones aleatorias
-            call gen_random_addr32;genero una memoria aleatoria
-            mov dword[eax],0xFFFFFFFF
-        loop gen_random_mem
-        
-    call clrscr
-    push dword[atributos]
-    push dword[fila]
-    push dword[columna]
-    push msg_inicio
-    call print; 
-    add esp,16; balo el esp los 4 push
-         
-    espero_tecla: 
-        in al,0x40
-        cmp dword[sys_ticks],10; si sys
-        jae imprimir_incremental; salto si sys_tics >= 10
-
-        mov al, [scan_code_actual]
-        cmp al,SC_BREAK_E
-        je generar_DE
-        cmp al,SC_BREAK_D
-        je generar_DF
-        cmp al,SC_BREAK_G
-        je generar_GP
-        cmp al,SC_BREAK_U
-        je generar_UD
-        cmp al,SC_BREAK_P
-        je generar_PF
-        cmp al,SC_MAKE_ESC
-        je llamar_esc_presionada
-        
-        
-        
-        cmp byte[buffer_COM1],0x00 ;si recibio algo
-        jne imprimir_serie
-        
-        
-    jmp espero_tecla
-    
-    llamar_esc_presionada:
-        call esc_presionada
-    jmp espero_tecla
-    
-    imprimir_incremental:
-
-    push buffer_itoa
-    push dword[entero_itoa]
-    call itoa
-    add esp,8;add esp,8; bajo el esp los 2 push
-    
-    push dword[atributos]
-    push dword[fila_cuenta]
-    push dword[columna_cuenta]
-    push buffer_itoa
-    call print; 
-    add esp,16; balo el esp los 4 push
-    
-    mov dword[sys_ticks],0x00; blanqueo el sys_ticks
-    inc dword[entero_itoa]; incremento el itoa
-    
-    jmp espero_tecla
-    
-    
-    imprimir_serie:
-            
-        push dword[atributos]
-        push dword[fila]
-        push dword[columna]
-        push buffer_COM1; pusheo para imprimir el caracter!
-        
-        call print
-        
-        add esp,16; balo el esp los 4 push
-    jmp espero_tecla
-    
-fin:
-    nop
-    jmp fin
+kernel_idle:
+    hlt
+    jmp kernel_idle
 
 ;;CODIGO AGREGADO POR GONZALO
 	
@@ -240,15 +224,62 @@ fin:
 ;********************************************************************************	
 SECTION .task1_code progbits
 task1:
-ret
+    push .buffer_itoa_t1
+    push dword[.task1_count]
+    call itoa
+    add esp,8;add esp,8; bajo el esp los 2 push
+
+    push dword[atributos]
+    push 0x00
+    push dword[columna]
+    push .buffer_itoa_t1
+    call print; 
+    add esp,16; balo el esp los 4 push
+    inc dword[.task1_count]
+    nop
+jmp task1
+
+.task1_count dd 0x00
+.buffer_itoa_t1 times 11 db 0x00
 
 SECTION .task2_code progbits
 task2:
-ret
+    push .buffer_itoa_t2
+    push dword[.task2_count]
+    call itoa
+    add esp,8;add esp,8; bajo el esp los 2 push
+    
+    push dword[atributos]
+    push 0x01
+    push dword[columna]
+    push .buffer_itoa_t2
+    call print; 
+    add esp,16; balo el esp los 4 push
+    inc dword[.task2_count]
+    nop
+jmp task2
+.task2_count dd 0x00
+.buffer_itoa_t2 times 11 db 0x00
 
 SECTION .task3_code progbits
 task3:
-ret
+    push .buffer_itoa_t3
+    push dword[.task3_count]
+    call itoa
+    add esp,8;add esp,8; bajo el esp los 2 push
+    
+    push dword[atributos]
+    push 0x02
+    push dword[columna]
+    push .buffer_itoa_t3
+    call print; 
+    add esp,16; balo el esp los 4 push
+    inc dword[.task3_count]
+    nop
+jmp task3
+
+.task3_count dd 0x00
+.buffer_itoa_t3 times 11 db 0x00
 
 ;FUNCIONES AGREGADAS
 SECTION .func progbits
@@ -665,20 +696,128 @@ handler_excep30:
 ; Handlers de interrupciones
 ;--------------------------------------------------------------------------------
 handler_interr0: ;handler del timer 
-    pushad
-
-    inc dword[sys_ticks]
+    cmp byte[task_init+0],0x00; la tarea 1 NO esta inicializada
+    je .init_task
+    cmp byte[task_init+1],0x00; la tarea 2 NO esta inicializada
+    je .init_task
+    cmp byte[task_init+2],0x00; la tarea 3 NO esta inizialidada
+    je .init_task
+    
+    jmp .task_switch ;si ya quedaron todas las tareas inicializadas...
+    
+    .init_task:
+    cmp dword[.task_actual], 0x00; si task_actual es 0, es porque es la primera vez que entra al handler!, entonces no debo salvar el contexto...
+    je .load_task
+    
+    ;sino es la tarea 1... entonces debo salvar el contexto de la tarea de la cual provengo.
+    push eax ; pusheo el valor de eax para resguardarlo
+    mov eax,dword[.task_actual]
+    mov eax,[task_contexts+eax*4-4]; en eax tengo ahora el puntero al contexto.
+    ;En este orden se guardan: EAX,ECX,EDX,EBX,EBP,ESI,EDI,ES,DS,FS y GS
+    pop dword[eax+4*0]; guardo el valor de eax en el contexto
+    mov [eax+4*1],ecx
+    mov [eax+4*2],edx
+    mov [eax+4*3],ebx
+    mov [eax+4*4],ebp
+    mov [eax+4*5],esi
+    mov [eax+4*6],edi
+    mov [eax+4*7+2*0],es
+    mov [eax+4*7+2*1],ss
+    mov [eax+4*7+2*2],ds
+    mov [eax+4*7+2*3],fs
+    mov [eax+4*7+2*4],gs
+    
+   .load_task:
+    pop ecx
+    pop ecx
+    pop ecx; aquí queda el EFLAGS
+    
+    mov eax,[.task_actual]
+    xor edx,edx ;limpio edx
+    mov ebx,0x03
+    div ebx ; si eax es 0, el resto es cero, si eax es 1, el resto es 1, si eax es 2, el resto es 2, si eax es 3, el resto es 0 de vuelta y así suscesivamente.
+    mov eax,edx;
+    add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
+    mov [.task_actual],eax; actualizo el valor de task actual con eax.
+    mov esp,[task_stacks+eax*4-4]; cambio la pila
+    mov ebx,[task_pds+eax*4-4]; cargo en ebx el nuevo cr3
+    mov cr3,ebx ; cambio el arbol de paginacion
+    mov ebx, [task_list+eax*4-4]; cargo la posición de inicio de la tarea en cuestión en ebx
+    mov [.task_actual], eax; la tarea actual corriendo es el valor situado en eax
+    mov byte[task_init+eax-1],0x01 ; la tarea queda inicializada!
+    
+    sub esp,8
+    mov [esp+8],ecx
+    mov dword[esp+4], SEL_CODIGO
+    mov [esp],ebx
     
     mov al, 0x20
     out 0x20,al ; Marco el EOI
     
-    popad
-    iret
+    iret ; salto al inicio de la tarea
     
+    .task_switch: ;aca va a empezar a entrar una vez que se hayan inicializado todas las tareas
+    xchg bx,bx
+    ;SALVO EL CONTEXTO DE LA TAREA QUE VENIA CORRIENDO
+    push eax ; pusheo el valor de eax para resguardarlo
+    mov eax,dword[.task_actual]
+    mov eax,[task_contexts+eax*4-4]; en eax tengo ahora el puntero al contexto.
+    ;En este orden se guardan: EAX,ECX,EDX,EBX,EBP,ESI,EDI,ES,DS,FS y GS
+    pop dword[eax+4*0]; guardo el valor de eax en el contexto
+    mov [eax+4*1],ecx
+    mov [eax+4*2],edx
+    mov [eax+4*3],ebx
+    mov [eax+4*4],ebp
+    mov [eax+4*5],esi
+    mov [eax+4*6],edi
+    mov [eax+4*7+2*0],es
+    mov [eax+4*7+2*1],ss
+    mov [eax+4*7+2*2],ds
+    mov [eax+4*7+2*3],fs
+    mov [eax+4*7+2*4],gs
     
-handler_interr1: ;handler del teclado!  
-    pushad; pusheo los registros de proposito general
+    ;CAMBIO A LA NUEVA TAREA
+    mov eax,[.task_actual]
+    xor edx,edx ;limpio edx
+    mov ebx, 0x03
+    div ebx ; si eax es 0, el resto es cero, si eax es 1, el resto es 1, si eax es 2, el resto es 2, si eax es 3, el resto es 0 de vuelta y así suscesivamente.
+    mov eax,edx;
+    add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
+    mov [.task_actual],eax; actualizo el valor de task actual con eax.
+    
+    mov eax,[task_contexts+eax*4-4]; puntero al nuevo almacenamiento de contextos.
+    
+    mov ecx,[eax+4*1]
+    mov edx,[eax+4*2]
+    mov ebx,[eax+4*3]
+    mov ebp,[eax+4*4]
+    mov esi,[eax+4*5]
+    mov edi,[eax+4*6]
+    mov es,[eax+4*7]
+    mov ss,[eax+4*7+2*1]
+    mov ds,[eax+4*7+2*1]
+    mov fs,[eax+4*7+2*2]
+    mov gs,[eax+4*7+2*3]
+    ;para este punto ya cargué la pila
+    push dword[eax+4*0]; pusheo el valor del eax viejo!
 
+    mov eax,[.task_actual]
+    ;cargo el nuevo arbol de páginas
+    mov eax,[task_pds+eax*4-4]
+    mov cr3, eax
+    
+    mov al, 0x20
+    out 0x20,al ; Marco el EOI
+    
+    pop eax; recupero el valor de eax!
+    
+    iret; hago el ret para volver a la ejecución de la tarea correspondiente
+    
+    .task_actual dd 0x00
+    
+handler_interr1: ;handler del teclado!
+    pushad; pusheo los registros de proposito general
+    
     in al, DATA_PORT_PS2 ;leo el valor de la tecla
     mov [scan_code_actual],al ;guardo el scan_code en la variable correspondiente
     

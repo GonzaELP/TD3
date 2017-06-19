@@ -44,6 +44,14 @@ SECTIONS
         }
         __tss_size = SIZEOF(.tss);
         
+        .contextos :
+        {
+            __contextos_start = . ;
+            *(.contextos);
+            __contextos_end = .;
+        }
+        __contextos_size = SIZEOF(.contextos);
+        
           /*PILAS DE LAS TAREAS*/
         .task1_stack 0x00150000 :
 		{ __task1_stack_start = . ; 

@@ -654,7 +654,8 @@ handler_excep30:
 ;--------------------------------------------------------------------------------
 handler_interr0: ;handler del timer 
     pushad
-
+    
+    xchg bx,bx 
     inc dword[sys_ticks]
     
     mov al, 0x20

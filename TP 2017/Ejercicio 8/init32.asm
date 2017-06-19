@@ -23,7 +23,7 @@
 ;********************************************************************************
 %define STACK_ADDRESS 0x00140000     
 %define STACK_SIZE_SO 1023
-%define STACK_SIZE_TAREAS 512
+%define STACK_SIZE_TAREAS 1024
 
 
 ;Definiciones para configurar el PIC 8259
@@ -92,7 +92,18 @@ GLOBAL          IDT32
 GLOBAL          PAGE_DIR_SO
 GLOBAL          PAGE_TABLES1_40_SO
 
+GLOBAL          PAGE_DIR_TASK1
+GLOBAL          PAGE_DIR_TASK2
+GLOBAL          PAGE_DIR_TASK3
+
+GLOBAL          task1_context
+GLOBAL          task2_context
+GLOBAL          task3_context
+
+GLOBAL          SEL_CODIGO
+
 EXTERN		start32
+EXTERN          kernel_idle
 
 EXTERN          vect_handlers
 
@@ -170,6 +181,7 @@ EXTERN          __task3_stack_start
 EXTERN          __task3_stack_end 
 EXTERN          __task3_stack_size	
 EXTERN          __task3_stack_phy_addr
+
 
 
 ;********************************************************************************
@@ -269,9 +281,8 @@ start:									; Punto de entrada
     
 
     ;Inicializo las tablas de PAGINACION!!
-    call InitTabPAG
-    call Init_Pag_Tasks
-    
+    call InitTagPag
+
     mov eax,CR0; cargo CR0 en eax
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
     mov CR0,eax
@@ -303,8 +314,9 @@ start:									; Punto de entrada
 ;Habilitacion de las interrupciones    
     sti
 
-;Salto al main
-    mov eax,start32 ;coloco en eax el offset del start
+;Salto a la primera tarea.
+    
+    mov eax,kernel_idle ;coloco en eax el offset del start
     push dword SEL_CODIGO ; Pusheo primero el selector de codigo
     push eax ;luego el offset
     retf ;si hago un return far saltare a SEL_CODIGO:start32 que es en el archivo "main"
@@ -358,7 +370,7 @@ fin_carga_idt:
 ;--------------------------------------------------------------------------------
 ; Inicializacion de las tablas de paginacion!
 ;--------------------------------------------------------------------------------
-InitTabPAG:
+InitTabPag_kernel:
  ;Busco hacer identity mapping, direcciones lineales se corresponden con las fisicas, ahora uso paginas de 4k
  ;Debo mapear las paginas de la rom y el Vector de reset es decir desde 0xFFFF0000 a 0xFFFF FFFF (es decir los ultimos 64k = 16 paginas) de la ultima entrada del directorio!.
  
@@ -433,54 +445,62 @@ ret
 ;--------------------------------------------------------------------------------
 ; Inicializacion de las tablas de paginacion de las TAREAS!
 ;--------------------------------------------------------------------------------
-Init_Pag_Tasks:
+InitTagPag:
 
-;Limpio todas las tablas y directorios de páginas para dejar no presente todo salvo las que habilito.  
+call InitTabPag_kernel ;Inicializo las tablas de paginas del kernel
+
+
     mov eax,0
     mov ecx, 1024
 .loop_clean:
-    mov [PAGE_DIR_TASK1+ecx*4-1],eax
-    mov [PAGE_DIR_TASK2+ecx*4-1],eax
-    mov [PAGE_DIR_TASK3+ecx*4-1],eax
-    mov [PAGE_TABLE0_TASK1+ecx*4-1],eax
-    mov [PAGE_TABLE0_TASK2+ecx*4-1],eax
-    mov [PAGE_TABLE0_TASK3+ecx*4-1],eax
-    mov [PAGE_TABLE5_TASK1+ecx*4-1],eax
-    mov [PAGE_TABLE5_TASK2+ecx*4-1],eax
-    mov [PAGE_TABLE5_TASK3+ecx*4-1],eax
+    ;Limpio los directorios de páginas para dejar todas las entradas "no presentes". Luego pondré presentes solo las que usaré.
+    mov [PAGE_DIR_TASK1+ecx*4-4],eax
+    mov [PAGE_DIR_TASK2+ecx*4-4],eax
+    mov [PAGE_DIR_TASK3+ecx*4-4],eax
+    
+    ;Copio la tabla de paginas 0 del kernel a las de las tareas para tener las traducciones handlers, las tablas de paginas,etc. 
+    mov ebx,[PAGE_TABLE0_SO+ecx*4-4]
+    mov [PAGE_TABLE0_TASK1+ecx*4-4],ebx
+    mov [PAGE_TABLE0_TASK2+ecx*4-4],ebx
+    mov [PAGE_TABLE0_TASK3+ecx*4-4],ebx
+    
+    ;Las tablas de páginas número "5" también las pongo todas en cero, luego pondré presentes solo las que se usan.
+    mov [PAGE_TABLE6_TASK1+ecx*4-4],eax
+    mov [PAGE_TABLE6_TASK2+ecx*4-4],eax
+    mov [PAGE_TABLE6_TASK3+ecx*4-4],eax
 loop .loop_clean
 
 ;Carga de los directorios de páginas
     mov eax,PAGE_TABLE0_TASK1;
     or eax,0x03; presente y lectura escritura
     mov [PAGE_DIR_TASK1+4*0],eax
-    mov eax, PAGE_TABLE5_TASK1;
+    mov eax, PAGE_TABLE6_TASK1;
     or eax, 0x03;
-    mov [PAGE_DIR_TASK1+4*5],eax
+    mov [PAGE_DIR_TASK1+4*6],eax
     
     mov eax,PAGE_TABLE0_TASK2;
     or eax,0x03; presente y lectura escritura
     mov [PAGE_DIR_TASK2+4*0],eax
-    mov eax, PAGE_TABLE5_TASK2;
+    mov eax, PAGE_TABLE6_TASK2;
     or eax, 0x03;
-    mov [PAGE_DIR_TASK2+4*5],eax
+    mov [PAGE_DIR_TASK2+4*6],eax
     
     mov eax,PAGE_TABLE0_TASK3;
     or eax,0x03; presente y lectura escritura
     mov [PAGE_DIR_TASK3+4*0],eax
-    mov eax, PAGE_TABLE5_TASK3;
+    mov eax, PAGE_TABLE6_TASK3;
     or eax, 0x03;
-    mov [PAGE_DIR_TASK3+4*5],eax
+    mov [PAGE_DIR_TASK3+4*6],eax
 
 ;Carga de las tablas de páginas 
-;TAREA 1
+;TAREA 1   
+    xchg bx,bx
    mov eax, __task1_stack_start
    mov ebx, 0x400000
    xor edx,edx; limpio edx
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task1_stack_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
    mov [PAGE_TABLE0_TASK1+edx*4],eax;
    
@@ -490,9 +510,8 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task1_code_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
-   mov [PAGE_TABLE5_TASK1+edx*4],eax;
+   mov [PAGE_TABLE6_TASK1+edx*4],eax;
    
 ;TAREA 2
    mov eax, __task2_stack_start
@@ -501,9 +520,8 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task2_stack_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
-   mov [PAGE_TABLE0_TASK1+edx*4],eax;
+   mov [PAGE_TABLE0_TASK2+edx*4],eax;
    
    mov eax, __task2_code_start
    mov ebx, 0x400000
@@ -511,9 +529,8 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task2_code_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
-   mov [PAGE_TABLE5_TASK2+edx*4],eax;
+   mov [PAGE_TABLE6_TASK2+edx*4],eax;
 
 ;TAREA 3
    mov eax, __task3_stack_start
@@ -522,9 +539,8 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task3_stack_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
-   mov [PAGE_TABLE0_TASK1+edx*4],eax;
+   mov [PAGE_TABLE0_TASK3+edx*4],eax;
    
    mov eax, __task3_code_start
    mov ebx, 0x400000
@@ -532,9 +548,8 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task3_code_phy_addr
-   shr eax,12
    or eax,0x03 ;presente y lectoescritura
-   mov [PAGE_TABLE5_TASK3+edx*4],eax;
+   mov [PAGE_TABLE6_TASK3+edx*4],eax;
    
 ret
 
@@ -620,7 +635,7 @@ InitPIT:
         ;0 ='0' Indica que es un contador binario (si estuviera en '1' seria BCD)
         
         
-        mov ax, 1193181 / 100; La frecuencia de clock del contador es 1.193.181Hz / 100 Hz (que es la frecuencia que quiero) me da las cuentas necesarias para lograr una cuadrada de periodo 10ms
+        mov ax, 1193181 / 1000; La frecuencia de clock del contador es 1.193.181Hz / 1000 Hz (que es la frecuencia que quiero) me da las cuentas necesarias para lograr una cuadrada de periodo 1ms
  
         ;Ahora debo cargar el canal 0 (0x40) con la cuenta indicada. Para ello, y dado lo especificado en la palabra de control, primero debo cargar el LSB y luego el MSB
 	out	0x40, al	;LSB
@@ -662,7 +677,7 @@ InitCOM1:
     mov dx,COM1+1
     out dx,al; Habilito las interrupciones de recepcion y de transmision! (0 y 1 respectivamente)
     
-    ret
+ret
 
 
 ;********************************************************************************
@@ -699,25 +714,11 @@ SEL_DATOS equ $-GDT32
     db 11001111b;
     db 0x00
 
-SEL_TASK1 equ $-GDT32
+SEL_TSS equ $-GDT32
     dw LONG_TSS-1
     dw 0x00
     db 0x00
     db 0x89
-    dw 0x00
-
-SEL_TASK2 equ $-GDT32
-    dw LONG_TSS-1
-    dw 0x00
-    db 0x00
-    db 0x89
-    dw 0x00
-    
-SEL_TASK3 equ $-GDT32
-    dw LONG_TSS-1
-    dw 0x00
-    db 0x00
-    db 0x89 ; COMIENZA DESOCUPADO
     dw 0x00
     
 LENGTH_GDT equ $-GDT32
@@ -756,16 +757,31 @@ SECTION     .task3_stack nobits
 resd STACK_SIZE_TAREAS
 
 ;--------------------------------------------------------------------------------
-; TSS's
+; TSS
 ;--------------------------------------------------------------------------------
 SECTION .tss nobits
 
-tss_task1:
+tss:
     resd LONG_TSS
-tss_task2:
-    resd LONG_TSS
-tss_task3:
-    resd LONG_TSS
+    
+;--------------------------------------------------------------------------------
+; Region de estructuras de contexto de las tareas.
+;--------------------------------------------------------------------------------
+SECTION .contextos nobits
+;SS,ESP,EFLAGS,CS y EIP se guardan ya por defecto en la pila de la tarea que se interrumpe!, no hace falta salvarlos
+;CR3 tampoco hace falta ya que el scheduler los conoce!
+;Se deben salvar: EAX,ECX,EDX,EBX,EBP,ESI,EDI,ES,SS,DS,FS y GS lo que nos da 7 dw y 4w
+task1_context:
+    resd 7
+    resw 5
+    
+task2_context:
+    resd 7
+    resw 5
+
+task3_context:
+    resd 7
+    resw 5   
 
 
 ;--------------------------------------------------------------------------------
@@ -801,11 +817,11 @@ PAGE_TABLE0_TASK2:
 PAGE_TABLE0_TASK3:
     resd 1024;
 
-PAGE_TABLE5_TASK1:
+PAGE_TABLE6_TASK1:
     resd 1024;
-PAGE_TABLE5_TASK2:
+PAGE_TABLE6_TASK2:
     resd 1024;
-PAGE_TABLE5_TASK3:
+PAGE_TABLE6_TASK3:
     resd 1024;
 
 ;********************************************************************************
