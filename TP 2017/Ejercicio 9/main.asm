@@ -103,6 +103,9 @@ EXTERN          task1_context
 EXTERN          task2_context
 EXTERN          task3_context
 
+EXTERN          task1_SIMD
+EXTERN          task2_SIMD
+EXTERN          task3_SIMD
 
 ;********************************************************************************
 ; Datos
@@ -223,6 +226,11 @@ task_contexts:
     dd task2_context
     dd task3_context
     
+task_SIMD:
+    dd task1_SIMD
+    dd task2_SIMD
+    dd task3_SIMD
+    
 task_priv:
     dd 0x03; Privilego tarea 1
     dd 0x03; Privilego tarea 2
@@ -248,6 +256,7 @@ kernel_idle:
 ;********************************************************************************	
 SECTION .task1_code progbits
 task1:
+    movd mm1,[.task1_count]
     cmp byte[.task1_init],0x00 ; no se inició todavía
     jne .normal_t1
     
@@ -295,6 +304,7 @@ jmp task1
 
 SECTION .task2_code progbits
 task2:
+    movd mm1,[.task2_count]
     cmp byte[.task2_init],0x00 ; no se inició todavía
     jne .normal_t2
     
@@ -340,6 +350,7 @@ jmp task2
 
 SECTION .task3_code progbits
 task3:
+    movd mm1,[.task3_count]
     cmp byte[.task3_init],0x00 ; no se inició todavía
     jne .normal_t3
     
@@ -596,7 +607,44 @@ handler_excep6: ;(invalid opcode)
     iret
 
 handler_excep7:
+;AQUI SE ENTRARA CUANDO LA TAREA ACTUAL EJECUTE UNA INSTRUCCION SIMD! 
+;POR LO TANTO DEBO RECUPERAR SU CONTEXTO SIMD ANTERIOR
+    pushad
+    
+    mov eax,cr0
+    mov ebx, 0x08
+    not ebx
+    and eax,ebx
+    mov cr0,eax;limpio en cr0 el bit de TS!!
+    
+    mov eax,cr3; cargo en eax el arbol de páginas, esto me dirá cual es la tarea actualmente en ejecución
+    cmp eax,[task_pds]; El cr3 cargado se corresponde con el de la tarea 1
+    je .tarea1
+    cmp eax,[task_pds+4]; El cr3 cargado se corresponde con el de la tarea 2
+    je .tarea2 
+    cmp eax,[task_pds+8]; El cr3 cargado se corresponde con el de la tarea 2   
+    je .tarea3
+    jmp .fin
+    
+    .tarea1:
+    mov eax, [task_SIMD]
+    fxrstor [eax]
+    jmp .fin
+    
+    .tarea2:
+    mov eax, [task_SIMD+4]
+    fxrstor [eax]
+    jmp .fin
+    
+    .tarea3:
+    mov eax,[task_SIMD+8]; aca muevo el puntero al contexto de las simd!!
+    fxrstor [eax]
+    jmp .fin
+    
+.fin:
+    popad
     iret
+.context_SIMD dd 0x00
 
 handler_excep8: ;(double fault)
     pop edx; popeo el codigo de error
@@ -824,7 +872,16 @@ handler_interr0: ;handler del timer, es decir el SCHEDULER
     mov [eax+4*8+2*2],ds
     mov [eax+4*8+2*3],fs
     mov [eax+4*8+2*4],gs
+    mov eax,cr0
+    and eax,0x08; Me fijo si el TS está en 1 o en 0
+    cmp eax, 0x00; si está en 0... es porque entró a la excepcion 7, debo salvar el contexto!
+    je .save_simd
     jmp .calc_next_task
+    
+    .save_simd:
+    mov eax,[.task_actual]
+    mov ebx,[task_SIMD+eax*4-4]
+    fxsave [ebx]
     
    .calc_next_task:
     mov eax,[.task_actual]
@@ -834,6 +891,12 @@ handler_interr0: ;handler del timer, es decir el SCHEDULER
     mov eax,edx;
     add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
     mov [.task_actual],eax; actualizo el valor de task actual con eax.
+    
+    ;SETEO EL CR0.TS por el cambio de tarea
+    mov ebx,cr0
+    or ebx, 0x08; seteo el bit 3, es decir TS=1
+    mov cr0,ebx
+    mov eax,[.task_actual]; recupero en eax el valor de la tarea actual
     
     cmp dword[task_priv+eax*4-4],0x03
     je .load_task_usuario ;si la tarea es de usuario... (PL=3)
@@ -931,7 +994,18 @@ handler_interr0: ;handler del timer, es decir el SCHEDULER
     mov [eax+4*8+2*2],ds
     mov [eax+4*8+2*3],fs
     mov [eax+4*8+2*4],gs
+    mov eax,cr0
+    and eax,0x08; Me fijo si el TS está en 1 o en 0
+    cmp eax, 0x00; si está en 0... es porque entró a la excepcion 7, debo salvar el contexto!
+    je .save_simd_2
+    jmp .calc_next_task_2
     
+    .save_simd_2:
+    mov eax,[.task_actual]
+    mov ebx,[task_SIMD+eax*4-4]
+    fxsave [ebx]
+    
+    .calc_next_task_2:
     ;ELIJO Y CAMBIO A LA NUEVA TAREA
     mov eax,[.task_actual]
     xor edx,edx ;limpio edx
@@ -940,6 +1014,11 @@ handler_interr0: ;handler del timer, es decir el SCHEDULER
     mov eax,edx;
     add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
     mov [.task_actual],eax; actualizo el valor de task actual con eax.
+    ;SETEO EL CR0.TS por el cambio de tarea
+    mov ebx,cr0
+    or ebx, 0x08; seteo el bit 3, es decir TS=1
+    mov cr0,ebx
+    mov eax,[.task_actual]; recupero en eax el valor de la tarea actual
     
     ;CAMBIO EL SP0 en la TSS
     mov edx,dword[task_stacks_kernel+eax*4-4]
