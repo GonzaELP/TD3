@@ -531,10 +531,10 @@ loop .loop_clean
     mov [PAGE_DIR_TASK1+4*6],eax
     
     mov eax,PAGE_TABLE0_TASK2;
-    or eax,0x03; presente y lectura escritura
+    or eax,0x07; presente y lectura escritura
     mov [PAGE_DIR_TASK2+4*0],eax
     mov eax, PAGE_TABLE6_TASK2;
-    or eax, 0x03;
+    or eax, 0x07;
     mov [PAGE_DIR_TASK2+4*6],eax
     
     mov eax,PAGE_TABLE0_TASK3;
@@ -589,7 +589,7 @@ loop .loop_clean
    div ebx
    shr edx,12
    mov eax, __task2_stack_NP3_phy_addr
-   or eax, 0x03
+   or eax, 0x07
    mov [PAGE_TABLE0_TASK2+edx*4],eax
    
    mov eax, __task2_code_start
@@ -598,7 +598,7 @@ loop .loop_clean
    div ebx; en eax queda el resultado de la division de eax/ebx y en edx queda el resto!
    shr edx,12; ahora ne edx me queda la posición dentro de la tabla de páginas.
    mov eax, __task2_code_phy_addr
-   or eax,0x03 ;presente y lectoescritura
+   or eax,0x07 ; usuario presente y lectoescritura
    mov [PAGE_TABLE6_TASK2+edx*4],eax;
 
 ;TAREA 3

@@ -64,6 +64,7 @@
 %define SYS_GET_SCANCODE 3
 %define SYS_SET_SCANCODE 4
 %define SYS_ITOA 5
+%define SYS_HLT 6
 
 ;--------------------------------------------------------------------------------
 ; Simbolos externos
@@ -96,7 +97,7 @@ EXTERN          __task2_stack_end
 EXTERN          __task3_stack_end 
 
 EXTERN          __task1_stack_NP3_end
-EXTERN          __task1_stack_NP3_end
+EXTERN          __task2_stack_NP3_end
 
 EXTERN          task1_context
 EXTERN          task2_context
@@ -202,9 +203,14 @@ task_pds:
     dd PAGE_DIR_TASK2
     dd PAGE_DIR_TASK3
 
-task_stacks:
+task_stacks_kernel:
     dd __task1_stack_end
     dd __task2_stack_end
+    dd __task3_stack_end
+    
+task_stacks_NP3:
+    dd __task1_stack_NP3_end
+    dd __task2_stack_NP3_end
     dd __task3_stack_end
     
 task_list:
@@ -216,6 +222,11 @@ task_contexts:
     dd task1_context
     dd task2_context
     dd task3_context
+    
+task_priv:
+    dd 0x03; Privilego tarea 1
+    dd 0x03; Privilego tarea 2
+    dd 0x00; Privilego tarea 3
 
 
 
@@ -237,10 +248,9 @@ kernel_idle:
 ;********************************************************************************	
 SECTION .task1_code progbits
 task1:
-    xchg bx,bx
    
     cmp byte[.task1_init],0x00 ; no se inició todavía
-    ;jne .normal_t1
+    jne .normal_t1
     
     mov eax,SYS_PRINT
     mov ebx, DEFAULT_ATTRIBUTES
@@ -249,11 +259,11 @@ task1:
     mov esi, .msg_task1
     int 0x80
     
-    ;.normal_t1:
-    ;mov eax, SYS_GET_SCANCODE
-    ;int 0x80
-    ;cmp eax,SC_BREAK_A
-    ;jne .fin
+    .normal_t1:
+    mov eax, SYS_GET_SCANCODE
+    int 0x80
+    cmp eax,SC_BREAK_A
+    jne .fin
     
     
     inc dword[.task1_count] ; incremento la variable que cuenta las pulsadas
@@ -274,8 +284,9 @@ task1:
     mov esi, .buffer_itoa_t1
     int 0x80
 
-    ;.fin:
-    ;hlt
+    .fin:
+    ;mov eax,SYS_HLT
+    ;int 0x80
 jmp task1
 
 .task1_init db 0x00
@@ -288,33 +299,40 @@ task2:
     cmp byte[.task2_init],0x00 ; no se inició todavía
     jne .normal_t2
     
-    push dword[atributos]
-    push COUNT_T2_Y
-    push dword[columna]
-    push .msg_task2
-    call print
-    add esp,16
-    mov byte[.task2_init],0x01
+    mov eax,SYS_PRINT
+    mov ebx, DEFAULT_ATTRIBUTES
+    mov ecx, COUNT_T2_Y
+    mov edx, 0
+    mov esi, .msg_task2
+    int 0x80
     
     .normal_t2:
-    cmp byte[scan_code_actual],SC_BREAK_B
+    mov eax, SYS_GET_SCANCODE
+    int 0x80
+    cmp eax,SC_BREAK_B
     jne .fin
     
     inc dword[.task2_count] ; incremento la variable que cuenta las pulsadas
-    mov byte[scan_code_actual],0x00; limpio el scan_code_actual
-    push .buffer_itoa_t2
-    push dword[.task2_count]
-    call itoa
-    add esp,8;add esp,8; bajo el esp los 2 push
+    
+    mov eax, SYS_SET_SCANCODE
+    mov ebx, 0x00; limpio el scan_code_actual, lo pongo en 0x00
+    int 0x80
 
-    push dword[atributos]
-    push COUNT_T2_Y
-    push COUNT_T2_X
-    push .buffer_itoa_t2
-    call print; 
-    add esp,16; balo el esp los 4 push
+    mov eax, SYS_ITOA
+    mov ebx, .buffer_itoa_t2
+    mov ecx, [.task2_count]
+    int  0x80
+        
+    mov eax,SYS_PRINT
+    mov ebx, DEFAULT_ATTRIBUTES
+    mov ecx, COUNT_T2_Y
+    mov edx, COUNT_T2_X
+    mov esi, .buffer_itoa_t2
+    int 0x80
+
     .fin:
-    hlt
+    ;mov eax,SYS_HLT
+    ;int 0x80
 jmp task2
 .task2_init db 0x00
 .task2_count dd 0x00
@@ -773,7 +791,9 @@ handler_excep30:
 ;--------------------------------------------------------------------------------
 ; Handlers de interrupciones
 ;--------------------------------------------------------------------------------
-handler_interr0: ;handler del timer 
+handler_interr0: ;handler del timer, es decir el SCHEDULER
+
+    
     cmp byte[task_init+0],0x00; la tarea 1 NO esta inicializada
     je .init_task
     cmp byte[task_init+1],0x00; la tarea 2 NO esta inicializada
@@ -781,11 +801,11 @@ handler_interr0: ;handler del timer
     cmp byte[task_init+2],0x00; la tarea 3 NO esta inizialidada
     je .init_task
     
-    jmp .task_switch ;si ya quedaron todas las tareas inicializadas...
+    jmp .task_switch ;si ya quedaron todas las tareas inicializadas...va directamente a conmutar
     
     .init_task:
     cmp dword[.task_actual], 0x00; si task_actual es 0, es porque es la primera vez que entra al handler!, entonces no debo salvar el contexto...
-    je .load_task
+    je .calc_next_task
     
     ;sino es la tarea 1... entonces debo salvar el contexto de la tarea de la cual provengo.
     push eax ; pusheo el valor de eax para resguardarlo
@@ -799,17 +819,15 @@ handler_interr0: ;handler del timer
     mov [eax+4*4],ebp
     mov [eax+4*5],esi
     mov [eax+4*6],edi
-    mov [eax+4*7+2*0],es
-    mov [eax+4*7+2*1],ss
-    mov [eax+4*7+2*2],ds
-    mov [eax+4*7+2*3],fs
-    mov [eax+4*7+2*4],gs
+    mov [eax+4*7],esp
+    mov [eax+4*8+2*0],ss
+    mov [eax+4*8+2*1],es
+    mov [eax+4*8+2*2],ds
+    mov [eax+4*8+2*3],fs
+    mov [eax+4*8+2*4],gs
+    jmp .calc_next_task
     
-   .load_task:
-    pop ecx
-    pop ecx
-    pop ecx; aquí queda el EFLAGS
-    
+   .calc_next_task:
     mov eax,[.task_actual]
     xor edx,edx ;limpio edx
     mov ebx,0x03
@@ -817,36 +835,74 @@ handler_interr0: ;handler del timer
     mov eax,edx;
     add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
     mov [.task_actual],eax; actualizo el valor de task actual con eax.
-    mov esp,[task_stacks+eax*4-4]; cambio la pila
+    
+    cmp dword[task_priv+eax*4-4],0x03
+    je .load_task_usuario ;si la tarea es de usuario... (PL=3)
+    jmp .load_task_kernel ;si la tarea es de "kernel"... (PL=/=3) ya que en TD3 no usamos ni PL=1 ni PL=2
+    
+    .load_task_kernel:
+    ;RECUPERO LO QUE ENTRO A LA PILA CON LA INTERRUPCION DE kernel->kernel, SOLO ME INTERESAN LOS FLAGS
+    pop edx; EIP
+    pop edx; CS
+    pop ecx; aquí queda el EFLAGS que es el unico registro que me interesa!!!
+    ;INICIALIZO LOS SELECTORES DE KERNEL
+    mov ax,SEL_DATOS
+    mov ss,ax
+    mov es,ax
+    mov ds,ax
+    ;INICIALIZO LA PILA, CAMBIO EL CR3 y ACTUALIZO EL ESTADO DE LAS TAREAS
+    mov eax,[.task_actual]
+    mov esp,[task_stacks_kernel+eax*4-4]; cambio la pila
     mov ebx,[task_pds+eax*4-4]; cargo en ebx el nuevo cr3
     mov cr3,ebx ; cambio el arbol de paginacion
     mov ebx, [task_list+eax*4-4]; cargo la posición de inicio de la tarea en cuestión en ebx
-    mov [.task_actual], eax; la tarea actual corriendo es el valor situado en eax
     mov byte[task_init+eax-1],0x01 ; la tarea queda inicializada!
-    
-    cmp dword[.task_actual],0x01 ;si la tarea actual es la tarea 1....
-    je .load_t1
-    
+    ;ACTUALIZO LA UNICA TSS
+    mov edx,dword[task_stacks_kernel+eax*4-4]
+    mov dword[tss_tt+0x04],edx
+    mov word[tss_tt+0x08],SEL_DATOS
+    ;CARGO EN LA PILA LOS FLAGS, EL SELECTOR DE CODIGO Y EL EIP para luego ejecutar el EOI y el IRET
     sub esp,8
     mov [esp+8],ecx
     mov dword[esp+4], SEL_CODIGO
-    mov [esp],ebx   
+    mov [esp],ebx
+    ;EOI
+    mov al, 0x20
+    out 0x20,al ; Marco el EOI
+    iret
     
-    .load_t1: ;salto con cambio de nivel de privilegio
-    mov dword[tss_tt+0x04],__task1_stack_end
-    mov word[tss_tt+0x08],SEL_DATOS
-    
-    mov ax, SEL_DATOS_NP3
-    or ax,0x03
-    mov ds,ax
-    mov ax, SEL_DATOS_NP3
-    or ax,0x03
+    .load_task_usuario: ;salto con cambio de nivel de privilegio    
+    ;RECUPERO LO QUE ENTRO EN LA PILA CON LA INTERRUPCION DE usuario->kernel (cambio de PL), SOLO ME INTERESAN LOS FLAGS
+    pop edx; EIP
+    pop edx; CS
+    pop ecx; aquí queda el EFLAGS que es el unico registro que me interesa!!!
+    cmp dword[.task_actual],0x01; si la tarea es la primera, en la inicializacion viene de kernel (sin cambio de PL)!, así que solo debo popear EIP, CS y EFLAGS!
+    je .load_task_usuario_cont 
+    pop edx; ESP
+    pop edx; SS
+    .load_task_usuario_cont:
+    ;INICIALIZO LOS SELECTORES DE USUARIO
+    mov ax,SEL_DATOS_NP3; Selector de datos de usuario!!!
+    or ax,0x03; Recordar poner el RPL en 3!!!
     mov es,ax
-    
+    mov ds,ax
+    ;INICIALIZO LA PILA de USUARIO, CAMBIO EL CR3 y ACTUALIZO EL ESTADO DE LAS TAREAS
+    mov eax,[.task_actual]
+    mov esp,[task_stacks_NP3+eax*4-4]; cambio la pila
+    mov ebx,[task_pds+eax*4-4]; cargo en ebx el nuevo cr3
+    mov cr3,ebx ; cambio el arbol de paginacion
+    mov ebx, [task_list+eax*4-4]; cargo la posición de inicio de la tarea en cuestión en ebx
+    mov byte[task_init+eax-1],0x01 ; la tarea queda inicializada!
+    ;ACTUALIZO LA UNICA TSS
+    mov edx,dword[task_stacks_kernel+eax*4-4]
+    mov dword[tss_tt+0x04],edx
+    mov word[tss_tt+0x08],SEL_DATOS
+    ;CARGO EN LA PILA EL SELECTOR DE DATOS DE USUARIO, EL PUNTERO DE PILA, LOS FLAGS, EL SELECTOR DE CODIGO y EL EIP INICIAL de la tarea 
     sub esp,16
     mov dword[esp+16],SEL_DATOS_NP3
     or  dword[esp+16],0x03; RPL=3!
-    mov dword[esp+12],__task1_stack_NP3_end
+    mov edx,dword[task_stacks_NP3+eax*4-4]
+    mov dword[esp+12],edx
     mov dword[esp+8],ecx
     mov dword[esp+4],SEL_CODIGO_NP3
     or  dword[esp+4],0x03; RPL=3!
@@ -858,8 +914,7 @@ handler_interr0: ;handler del timer
     iret ; salto al inicio de la tarea
     
     .task_switch: ;aca va a empezar a entrar una vez que se hayan inicializado todas las tareas
-
-    ;SALVO EL CONTEXTO DE LA TAREA QUE VENIA CORRIENDO
+    ;SALVO EL CONTEXTO DE LA TAREA QUE VENIA CORRIENDO    
     push eax ; pusheo el valor de eax para resguardarlo
     mov eax,dword[.task_actual]
     mov eax,[task_contexts+eax*4-4]; en eax tengo ahora el puntero al contexto.
@@ -871,13 +926,14 @@ handler_interr0: ;handler del timer
     mov [eax+4*4],ebp
     mov [eax+4*5],esi
     mov [eax+4*6],edi
-    mov [eax+4*7+2*0],es
-    mov [eax+4*7+2*1],ss
-    mov [eax+4*7+2*2],ds
-    mov [eax+4*7+2*3],fs
-    mov [eax+4*7+2*4],gs
+    mov [eax+4*7],esp
+    mov [eax+4*8+2*0],ss
+    mov [eax+4*8+2*1],es
+    mov [eax+4*8+2*2],ds
+    mov [eax+4*8+2*3],fs
+    mov [eax+4*8+2*4],gs
     
-    ;CAMBIO A LA NUEVA TAREA
+    ;ELIJO Y CAMBIO A LA NUEVA TAREA
     mov eax,[.task_actual]
     xor edx,edx ;limpio edx
     mov ebx, 0x03
@@ -886,27 +942,35 @@ handler_interr0: ;handler del timer
     add eax,1; acá finalmente en eax dejo 1,2 o 3 (la tarea actual)
     mov [.task_actual],eax; actualizo el valor de task actual con eax.
     
+    ;CAMBIO EL SP0 en la TSS
+    mov edx,dword[task_stacks_kernel+eax*4-4]
+    mov dword[tss_tt+0x04],edx
+    mov word[tss_tt+0x08],SEL_DATOS
+    
     mov eax,[task_contexts+eax*4-4]; puntero al nuevo almacenamiento de contextos.
     
+    ;RECUPERO EL CONTEXTO DE LA TAREA NUEVA
     mov ecx,[eax+4*1]
     mov edx,[eax+4*2]
     mov ebx,[eax+4*3]
     mov ebp,[eax+4*4]
     mov esi,[eax+4*5]
     mov edi,[eax+4*6]
-    mov es,[eax+4*7]
-    mov ss,[eax+4*7+2*1]
-    mov ds,[eax+4*7+2*1]
-    mov fs,[eax+4*7+2*2]
-    mov gs,[eax+4*7+2*3]
-    ;para este punto ya cargué la pila
-    push dword[eax+4*0]; pusheo el valor del eax viejo!
-
+    mov esp,[eax+4*7]
+    mov ss,[eax+4*8+2*0]
+    mov es,[eax+4*8+2*1]
+    mov ds,[eax+4*8+2*2]
+    mov fs,[eax+4*8+2*3]
+    mov gs,[eax+4*8+2*4]
+    
     mov eax,[.task_actual]
     ;cargo el nuevo arbol de páginas
     mov eax,[task_pds+eax*4-4]
     mov cr3, eax
     
+    ;para este punto ya cargué la pila
+    push dword[eax+4*0]; pusheo el valor del eax viejo!
+
     mov al, 0x20
     out 0x20,al ; Marco el EOI
     
@@ -1013,6 +1077,8 @@ sys_call:
      je .set_scancode
      cmp eax, SYS_ITOA
      je ._itoa
+     cmp eax, SYS_HLT
+     je ._hlt
      
      jmp .fin
     
@@ -1044,8 +1110,10 @@ sys_call:
     .set_scancode:
        mov [scan_code_actual],ebx
        jmp .fin
-        
-    .
+    
+    ._hlt:
+        hlt;
+      jmp .fin
 
 .fin:
     iret
