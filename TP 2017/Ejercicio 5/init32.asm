@@ -93,25 +93,37 @@ EXTERN          vect_handlers
 EXTERN          __sys_tables_LMA
 EXTERN          __sys_tables_start
 EXTERN          __sys_tables_end
+EXTERN          __sys_tables_size
+
 EXTERN          __main_LMA
 EXTERN          __main_start
 EXTERN          __main_end
+EXTERN          __main_size
+
 EXTERN          __mdata_LMA
 EXTERN          __mdata_start
 EXTERN          __mdata_end
+EXTERN          __mdata_size
+
 EXTERN          __pag_tables_LMA
 EXTERN          __pag_tables_start
 EXTERN          __pag_tables_end
+EXTERN          __pag_tables_size
+
 EXTERN          __func_LMA
 EXTERN          __func_start
 EXTERN          __func_end
+EXTERN          __func_size
 
 EXTERN          __stack_LMA
 EXTERN          __stack_start
 EXTERN          __stack_end
+EXTERN          __stack_size
+
 
 EXTERN          __bss_start
 EXTERN          __bss_end
+EXTERN          __bss_size
 
 
 
@@ -143,39 +155,42 @@ start:									; Punto de entrada
  
 ;;CODIGO AGREGADO POR GONZALO
     
-;Movimiento del codigo a los lugares que corresponda! los parametros los pasa el Linker Script
-    
+;Movimiento del codigo correspondiente a las tablas de sistema usando los datos del linker script, lo debo hacer sin llamadas ya que no puedo usar el stack pointer hasta tanto no inicialice las estructuras!   
     
     mov esi, __sys_tables_LMA
     mov edi, __sys_tables_start
-    mov ecx, __sys_tables_end
-    sub ecx,__sys_tables_start ;calculo la longitud en memoria
+    mov ecx, __sys_tables_size
     rep movsb 
 
-    mov esi, __main_LMA
-    mov edi, __main_start
-    mov ecx, __main_end
-    sub ecx,__main_start ;calculo la longitud en memoria
-    rep movsb
-    
-    mov esi, __func_LMA
-    mov edi, __func_start
-    mov ecx, __func_end
-    sub ecx, __func_start ;calculo la longitud en memoria
-    rep movsb 
-    
-    mov edi, __stack_start
-    mov ecx, __stack_end
-    sub ecx, __stack_start
-    rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
+;Cargo la GDT
+    lgdt [my_gdtr]
+
+;Inicializacion de la pila para poder llamar funciones!!
+    mov ax,SEL_DATOS
+    mov ss,ax
+    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)    
     
     
-    mov esi, __mdata_LMA
-    mov edi, __mdata_start
-    mov ecx, __mdata_end
-    sub ecx, __mdata_start ;calculo la longitud en memoria
-    rep movsb 
+;Movimiento del resto del codigo a los lugares que corresponda! los parametros los pasa el Linker Script       
+    push __main_size
+    push __main_LMA
+    push __main_start
+    call my_memcpy
+    add esp,3*4
     
+    push __func_size
+    push __func_LMA
+    push __func_start
+    call my_memcpy
+    add esp,3*4
+    
+    push __mdata_size
+    push __mdata_LMA
+    push __mdata_start
+    call my_memcpy
+    add esp,3*4
+    
+;Inicializo en cero las zonas de memoria dinamica    
     xor eax,eax ;limpio el registro eax para que quede en cero
     mov edi, __bss_start
     mov ecx, __bss_end
@@ -185,9 +200,7 @@ start:									; Punto de entrada
     
 ;Carga de la IDT
     call InitIDT
-
 ;Carga de las tablas de sistema
-    lgdt [my_gdtr]
     lidt [my_idtr] 
 
 ;Inicializo las tablas de PAGINACION!!
@@ -196,11 +209,6 @@ start:									; Punto de entrada
     mov eax,CR0; cargo CR0 en eax
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
     mov CR0,eax 
-    
-;Inicializacion de la pila.
-    mov ax,SEL_DATOS
-    mov ss,ax
-    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
 
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
@@ -210,11 +218,11 @@ start:									; Punto de entrada
 
 ;Inicializacion del puerto serie
     call InitCOM1
-    
-    sti
-;Salto al main
 
-  
+;Habilitacion de las interrupciones
+    sti
+    
+;Salto al main
     mov eax,start32 ;coloco en eax el offset del start
     push dword SEL_CODIGO ; Pusheo primero el selector de codigo
     push eax ;luego el offset
@@ -248,7 +256,7 @@ ciclo_carga_idt_excep:
     mov[IDT32+8*ecx+6],ax
     inc ecx
     cmp ecx,ebx ;carga hasta el descriptor CANT_HANDLERS-1!
-    jne ciclo_carga_idt_excep
+jne ciclo_carga_idt_excep
 
     mov edx, LENGTH_VECT_HANDLERS_INTERR; cargo la cantidad de handlers de interrupciones en edx
     shr edx,2; la divido por 4, ya que cada handler tiene 4 bytes, con esto tendre el numero de handlers de interrupciones
@@ -263,7 +271,7 @@ ciclo_carga_idt_interr:
      mov[IDT32+8*ecx+6],ax
      inc ecx
      cmp ecx,ebx ;carga hasta el descriptor CANT_HANDLERS-1!
-     jne ciclo_carga_idt_interr    
+jne ciclo_carga_idt_interr    
 
 fin_carga_idt:
     ret
@@ -331,6 +339,33 @@ fin_InitPAG:
 mov eax, PAGE_DIR; cargo en eax la base del directorio de paginas
 mov CR3, eax; cargo CR3 con la base del directorio de paginas!!
 
+ret
+
+
+
+
+;--------------------------------------------------------------------------------
+;Rutina de copiado de codigo
+
+;void* my_memcpy(void * destination, void* source, uint size);
+; EIP de regreso: EBP+4
+; destination: EBP+8
+; source: EBP+12
+; size: EBP+16
+;--------------------------------------------------------------------------------
+my_memcpy:
+  
+  push ebp
+  mov ebp,esp
+  
+  mov esi, [ebp+12]
+  mov edi, [ebp+8]
+  mov ecx, [ebp+16]
+  rep movsb
+  
+  pop ebp
+
+ret
 
 ;--------------------------------------------------------------------------------
 ; Inicializacion del controlador de interrupciones

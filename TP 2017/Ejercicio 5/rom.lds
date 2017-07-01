@@ -17,58 +17,63 @@ SECTIONS
 		__sys_tables_start = .;                                   /*__sys_tables_start tendra el comienzo de las tablas en VMA*/
 		*(.sys_tables*);                                          /*Incluye todas las secciones sys_tables*/
 		__sys_tables_end = . ;}                                   /*Luego de incluirlas estaremos parados en la posicion final de las tablas en VMA*/
+        __sys_tables_size = SIZEOF(.tables);
+   
 		
+        .stack 0x00009000 :
+		{ __stack_start = . ; 
+		*(.stack);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
+		__stack_end = . ;} 
+	__stack_size = SIZEOF(.stack);	
         
-		
-	. = 0x0000A000; 							/* location counter = VMA */
+        . = 0x0000A000; 							/* location counter = VMA */
 	__main_start = . ;							/* VMA del punto de entrada 1Mb */
 	.main :										/* seccion de salida */
 	  AT ( LOADADDR(.tables) + SIZEOF(.tables) )
 		{ __main_LMA = LOADADDR(.main);			/* LMA del codigo de 32 */
 		*(.main);                                     /*Incluye todas las secciones MAIN*/
-		__main_end = . ; }                        /*Luego de incluir todo es el "__main_end" en VMA*/
-		
-		
-        . = 0x0000D000; 							/* location counter = VMA */
-	__func_start = . ;							/* VMA del punto de entrada 1Mb */
-	.func :										/* seccion de salida */
-	  AT ( LOADADDR(.main) + SIZEOF(.main) )
-		{ __func_LMA = LOADADDR(.func);			/* LMA del codigo de 32 */
-		*(.func);                                     /*Incluye todas las secciones MAIN*/
-		__func_end = . ; }                        /*Luego de incluir todo es el "__main_end" en VMA*/
-		
-        
+		 __main_end = . ; }                        /*Luego de incluir todo es el "__main_end" en VMA*/
+	__main_size = SIZEOF(.main);	
 		
 	.mdata 0x0000B000 : 	
-	  AT ( LOADADDR(.func) + SIZEOF(.func) )
+	  AT ( LOADADDR(.main) + SIZEOF(.main) )
 		{ __mdata_LMA = LOADADDR(.mdata);
 		  __mdata_start = . ; *(.data);
 		  __mdata_end = . ; }
+        __mdata_size = SIZEOF(.mdata);
 		  
-	 
-         .stack :
-		{ __stack_start = . ; 
-		*(.stack);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
-		__stack_end = . ;} 
-		
-	__datos_no_iniciali_inicio = .;
-	 .bss :
+		  
+        __datos_no_iniciali_inicio = .;
+	 .bss 0x0000C000 :
 		{ __bss_start = . ; 
 		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
 		*(.dat_no_inic*);
-		__bss_end = . ;} 
+		__bss_end = . ;}
+        __bss_size = SIZEOF(.bss);
+		  
+		  
+        . = 0x0000D000; 							/* location counter = VMA */
+	__func_start = . ;							/* VMA del punto de entrada 1Mb */
+	.func :										/* seccion de salida */
+	  AT ( LOADADDR(.mdata) + SIZEOF(.mdata) )
+		{ __func_LMA = LOADADDR(.func);			/* LMA del codigo de 32 */
+		*(.func);                                     /*Incluye todas las secciones MAIN*/
+		 __func_end = . ; }                        /*Luego de incluir todo es el "__main_end" en VMA*/
+	__func_size = SIZEOF(.func);	
 		
-		
-         .sys_idt :
+	 
+        .sys_idt :
 		{ __sys_idt_start = . ; 
 		*(.sys_idt);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
-		__sys_idt_end = . ;} 
+		__sys_idt_end = . ;}
+        __sys_idt_size = SIZEOF(.sys_idt);
      
             
         .tablas_paginas ALIGN(0x1000) : 
                 {__pag_tables_start = . ; 
                 *(.pag_tables);
-		__pag_tables_end = . ;} 
+		__pag_tables_end = . ;}
+        __pag_tables_size = SIZEOF(.tablas_paginas);
   
 
 }
