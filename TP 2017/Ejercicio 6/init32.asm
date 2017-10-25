@@ -130,6 +130,7 @@ Entry:										; Punto de entrada definido en el linker
 ;********************************************************************************
 USE32
 SECTION 	.init
+
 ;--------------------------------------------------------------------------------
 ; Punto de entrada
 ;--------------------------------------------------------------------------------
@@ -155,8 +156,14 @@ start:									; Punto de entrada
     mov esi, __main_LMA
     mov edi, __main_start
     mov ecx, __main_end
-    sub ecx,__main_start ;calculo la longitud en memoria
+    sub ecx, __main_start ;calculo la longitud en memoria
     rep movsb
+    
+    mov esi, __mdata_LMA
+    mov edi, __mdata_start
+    mov ecx, __mdata_end
+    sub ecx, __mdata_start ;calculo la longitud en memoria
+    rep movsb 
     
     mov esi, __func_LMA
     mov edi, __func_start
@@ -169,18 +176,16 @@ start:									; Punto de entrada
     sub ecx, __stack_start
     rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
     
-    
-    mov esi, __mdata_LMA
-    mov edi, __mdata_start
-    mov ecx, __mdata_end
-    sub ecx, __mdata_start ;calculo la longitud en memoria
-    rep movsb 
-    
     xor eax,eax ;limpio el registro eax para que quede en cero
     mov edi, __bss_start
     mov ecx, __bss_end
     sub ecx, __bss_start
     rep stosb ;lleno toda la region de memoria correspondiente a variables no inicializadas con ceros
+    
+;Inicializacion de la pila. ANTES QUE NADA DEBO INICIALIZAR LA PILA PARA LUEGO PODER LLAMAR FUNCIONES!!!!!!!!
+    mov ax,SEL_DATOS
+    mov ss,ax
+    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
     
     
 ;Carga de la IDT
@@ -190,6 +195,7 @@ start:									; Punto de entrada
     lgdt [my_gdtr]
     lidt [my_idtr] 
 
+    
 ;Inicializo las tablas de PAGINACION!!
     call InitTabPAG
     
@@ -197,11 +203,6 @@ start:									; Punto de entrada
     or eax, 0x80000000; enciendo el bit 31, habilito paginacion!
     mov CR0,eax 
     
-;Inicializacion de la pila.
-    mov ax,SEL_DATOS
-    mov ss,ax
-    mov esp,__stack_end ;(direccion fisica de la pila + tamaño, ojo no pisar otras secciones!!)
-
 ;Inicializacion de los PICs
     call InitPIC; llamada a la rutina de inicializacion de los PICS
 
@@ -213,7 +214,7 @@ start:									; Punto de entrada
     
     sti
 ;Salto al main
-
+    
   
     mov eax,start32 ;coloco en eax el offset del start
     push dword SEL_CODIGO ; Pusheo primero el selector de codigo
@@ -312,8 +313,6 @@ ciclo_InitPAG1:
     jb ciclo_InitPAG1; me voy si ya cargue todas las paginas!.
     
 
-
-
 mov eax, 0xFFFF0000; a partir de esta direccion y hasta 0xFFFF FFFF quiero paginar, es decir 64k= 16 paginas     
 or eax, 0x03
 
@@ -331,6 +330,7 @@ fin_InitPAG:
 mov eax, PAGE_DIR; cargo en eax la base del directorio de paginas
 mov CR3, eax; cargo CR3 con la base del directorio de paginas!!
 
+ret
 
 ;--------------------------------------------------------------------------------
 ; Inicializacion del controlador de interrupciones
