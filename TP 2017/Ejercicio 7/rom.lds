@@ -41,7 +41,7 @@ SECTIONS
 		  
 		  
         __datos_no_iniciali_inicio = .;
-	 .bss 0x0000C000 :
+	 .bss :
 		{ __bss_start = . ; 
 		*(.bss);        /*Los datos no inicializados no tienen un lugar definido en LMA!! ya que no ocupan lugar en ROM*/
 		*(.dat_no_inic*);
