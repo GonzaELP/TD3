@@ -67,7 +67,16 @@ static struct class *cl;
 
 static void __iomem* i2c_mem;
 
+static unsigned int virq; //valor que asigna linux a la interrupcion de interes
+
 static wait_queue_head_t letras_waitqueue;
+
+/*Cuenta de bytes enviados o recibidos*/
+volatile unsigned int tCount;
+volatile unsigned int rCount;
+volatile unsigned char dataR[2];
+
+volatile unsigned int numOfBytes;
 
 static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
  
@@ -167,94 +176,76 @@ long i2c_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
 static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose)
 {
+	unsigned int aux=0;
 	
-  /*ioread32
-  char buffer[500];
-  int i;
-  int totalcount = count;                       // Si la cantidad de bytes a leer
-  if (totalcount > sizeof(buffer))              // es muy elevada, truncar a la
-  {                                             // longitud del buffer interno.
-    totalcount = sizeof(buffer);
-  }
-  while (siguienteLetra == 'a')                 // Esperar hasta que otro proceso
-  {					      // cambie la siguiente letra.
-    if (wait_event_interruptible(letras_waitqueue, (siguienteLetra != 'a')))
-    {
-      return -ERESTARTSYS;          // Vino una senial
-    }
-  }
-  for (i=0; i<totalcount; i++)	              // Por cada caracter pedido desde la
-  {					      // aplicacion
-    *(buffer+i) = siguienteLetra;         // Generar caracter.
-    if (++siguienteLetra > 'Z')           // Cambiar a la siguiente letra.
-    {
-      siguienteLetra = 'A';
-    }
-  }
-  __copy_to_user(buf, buffer, totalcount);      // Copiar al buffer de la aplicacion.
-  
-  return totalcount;                            // Indicar cantidad de bytes leidos.*/
-  return 1;
-}
+	rCount=0; //limpio la cuenta de recepcion
+	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
 	
-static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t *nose)
-{
-	printk(KERN_ALERT "Escribi en el driver I2C... aparentemente :S \n");
+	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
 	
-	unsigned aux=0;
-	unsigned i=0;
-	unsigned char buffer[100];
+	iowrite32(0x6FFF,i2c_mem+I2C_IRQSTATUS);  //limpio el registro de estado de interrupciones
+	iowrite32(0x6FFF,i2c_mem+I2C_IRQENABLE_CLR); //deshabilito todas las interrupciones
 	
-	iowrite32(0x48,i2c_mem+I2C_SA); //seteo la direccion del esclavo
-	
-	
+	//Seteo el modulo en MASTER TX
 	aux=ioread32(i2c_mem+I2C_CON);
 	aux|=(1<<10); //lo coloco en MASTER.
 	aux|=(1<<9); //lo coloco en TX
 	iowrite32(aux,i2c_mem+I2C_CON);
-		
+	
+	//Lo paso a MASTER RX
 	aux=ioread32(i2c_mem+I2C_CON);	
 	aux&=(~(1<<9)); // paso a RX.
 	iowrite32(aux,i2c_mem+I2C_CON);	
-
-	iowrite32(0x02,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en 2
 	
-	while(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1<<12)); //se queda aca mientras esta en busy
+	//Habilito las INTERRUPCIONES relevantes
+	iowrite32( ((1<<3) | (1<<8)),i2c_mem+I2C_IRQENABLE_SET); //habilito las irq por recepcion lista (RRDY, 3) y por condicion de stop (BF,8)
 	
-	iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_SET); //seteo la interrupcion por RDRY
-	
+	//Coloco en el bus la condicion de START
 	aux=ioread32(i2c_mem+I2C_CON);
-	aux|=(1<<0);//condicion de start
+	aux|=(1<<0);
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
+	while(!(rCount == numOfBytes));
 	
-	for(i=0; i<2;i++) //voy a recibir 2 bytes
-	{
-		printk(KERN_ALERT "El valor leido en la vuelta %d es %x bufstat %x",i,ioread32(i2c_mem+I2C_IRQSTATUS_RAW),ioread32(i2c_mem+I2C_BUFSTAT));
-		while(!(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1<<3))); //mientras el RRDY este en 0 lo sigo polleando.
-		//printk(KERN_ALERT "Al menos una vez pase el while");
-		//iowrite32((1<<7),i2c_mem+I2C_IRQSTATUS_RAW);
-		buffer[i]=ioread32(i2c_mem+I2C_DATA); //leo la información
-	}
+	__copy_to_user(buf,dataR,count); //copio el buffer al usuario
 	
+	return count;
+}
+	
+static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t *nose)
+{
+	unsigned int aux=0;
+	
+	rCount=0; //limpio la cuenta de recepcion
+	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
+	
+	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
+	
+	iowrite32(0x6FFF,i2c_mem+I2C_IRQSTATUS);  //limpio el registro de estado de interrupciones
+	iowrite32(0x6FFF,i2c_mem+I2C_IRQENABLE_CLR); //deshabilito todas las interrupciones
+	
+	//Seteo el modulo en MASTER TX
 	aux=ioread32(i2c_mem+I2C_CON);
-	aux|=(1<<1); //seteo el bit de stop
+	aux|=(1<<10); //lo coloco en MASTER.
+	aux|=(1<<9); //lo coloco en TX
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	unsigned int temp=0;
-	temp= (buffer[0] << 3)+(buffer[1] >> 5);
-	temp= temp/8;
-	printk(KERN_ALERT "La temperatura es %u \n",temp);
+	//Lo paso a MASTER RX
+	aux=ioread32(i2c_mem+I2C_CON);	
+	aux&=(~(1<<9)); // paso a RX.
+	iowrite32(aux,i2c_mem+I2C_CON);	
 	
-	return temp;
- /*char letraAnterior = siguienteLetra;
-  __copy_from_user(&siguienteLetra, buf, 1);        // Obtener caracter de la aplicacion.
-  if (letraAnterior == 'a' && siguienteLetra != 'a')
-  {
-    wake_up_interruptible(&letras_waitqueue); // Despertar proceso que lee.
-  }
-  return count;                                     // Indicar cantidad de bytes escritos.
-*/
+	//Habilito las INTERRUPCIONES relevantes
+	iowrite32( ((1<<3) | (1<<8)),i2c_mem+I2C_IRQENABLE_SET); //habilito las irq por recepcion lista (RRDY, 3) y por condicion de stop (BF,8)
+	
+	//Coloco en el bus la condicion de START
+	aux=ioread32(i2c_mem+I2C_CON);
+	aux|=(1<<0);
+	iowrite32(aux,i2c_mem+I2C_CON);
+	
+	while(!(rCount == numOfBytes));
+	
+	return count;
 }
 
 struct file_operations i2c_fops =
@@ -331,7 +322,7 @@ static int i2c_init( void )
   
   struct irq_data *irq_data = irq_get_irq_data(16); //tiro un valor de interrupcion conocida para obtener el dominio
 
-  unsigned int virq=irq_create_mapping(irq_data->domain,I2C1_IRQ); //mapeo la IRQ de HW a linux
+  virq=irq_create_mapping(irq_data->domain,I2C1_IRQ); //mapeo la IRQ de HW a linux
   printk( KERN_ALERT "El valor de VIRQ es %d!\n",virq );
   
   if(request_irq(virq,(irq_handler_t)i2c_td3_irq_handler,IRQF_TRIGGER_FALLING,"i2c_td3_handler",NULL)!=0)
@@ -356,7 +347,7 @@ static int i2c_init( void )
 static void i2c_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
-  free_irq(I2C1_IRQ,NULL);
+  free_irq(virq,NULL);
   cdev_del(&i2c_cdev);
   device_destroy( cl, dev );
   class_destroy( cl );
@@ -368,12 +359,32 @@ static void i2c_exit( void )
 
 static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs)
 {
-	static int veces = 0;
-	printk(KERN_ALERT "Se ejecuto la interrupcion %d veces \n",veces);
-	veces++;
-	iowrite32((1<<3),i2c_mem+I2C_IRQSTATUS);
-	if(veces > 5)
-	{iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_CLR);} //luego de 5 entradas deshabilito la interrupción
+	unsigned int status = ioread32(i2c_mem+I2C_IRQSTATUS); //leo el estado actual de las interrupciones
+	
+	iowrite32((status & (~((1<<3) | (1<<4)))),i2c_mem+I2C_IRQSTATUS); //limpio TODAS las interrupciones menos XRDY y RRDY
+	
+	if(status & (1<<3)) //interrupcion por RDRY
+	{
+		dataR[rCount]=(unsigned char)ioread32(i2c_mem+I2C_DATA); //leo lo recibido.
+		rCount++;
+		iowrite32((1<<3),i2c_mem+I2C_IRQSTATUS); //limpio la interrupción.
+		
+		if(rCount==numOfBytes) //ya recibí el total!
+		{
+			iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_CLR); //deshabilito la interrupción de recepción.
+			
+			unsigned int aux=ioread32(i2c_mem+I2C_CON);
+			aux|=(1<<1);//condicion de start
+			iowrite32(aux,i2c_mem+I2C_CON);
+			
+		}
+	}
+	
+	if(status & (1<<4)) //interrupcion por XRDY
+	{
+		
+	}
+		
 	return (irq_handler_t) IRQ_HANDLED;
  
 }
