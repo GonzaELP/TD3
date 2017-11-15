@@ -25,12 +25,16 @@
 #include <linux/sched.h>
 #include <asm/io.h>
 #include <linux/ioctl.h>
+#include <linux/irqdomain.h>
+#include <linux/interrupt.h> //para poder usar interrupciones!
 
 #define I2C1_BASE_ADDR 0x4802A000
 #define I2C1_LENGTH 0x1000
 
 #define I2C_IRQSTATUS_RAW 0x24
 #define I2C_IRQSTATUS 0x28
+#define I2C_IRQENABLE_SET 0x2C
+#define I2C_IRQENABLE_CLR 0x30
 #define I2C_CON 0xA4
 #define I2C_SA 0xAC
 #define I2C_PSC 0xB0
@@ -40,6 +44,7 @@
 #define I2C_DATA 0x9C
 #define I2C_BUFSTAT 0xC0
 
+#define I2C1_IRQ (71)
 
 
 #define CM_PER_I2C1_CLKCTRL 0x44E00048
@@ -64,6 +69,8 @@ static void __iomem* i2c_mem;
 
 static wait_queue_head_t letras_waitqueue;
 
+static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
+ 
 
 static int i2c_open(struct inode *i, struct file *f)
 {
@@ -87,15 +94,11 @@ static int i2c_open(struct inode *i, struct file *f)
 	iowrite32(a,p3);
 	iowrite32(a,p4);
 	
-	a=ioread32((unsigned int*) p3);
-	b=ioread32((unsigned int*) p4);
-	printk(KERN_ALERT "El valor del reg pinmux es %x y el otro %x \n",a,b);
-	
-	
-	
 	//desmapeo los dos registros solicitados antes
 	iounmap(p1);
 	iounmap(p2);
+	iounmap(p3);
+	iounmap(p4);
 	
 	unsigned int aux = ioread32(i2c_mem+I2C_CON); //resguardo el valor original del registro de control
 	aux &= (~(1 << 15)); //deshabilito el modulo I2C_EN = 0
@@ -218,6 +221,7 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 	
 	while(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1<<12)); //se queda aca mientras esta en busy
 	
+	iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_SET); //seteo la interrupcion por RDRY
 	
 	aux=ioread32(i2c_mem+I2C_CON);
 	aux|=(1<<0);//condicion de start
@@ -324,11 +328,24 @@ static int i2c_init( void )
     unregister_chrdev_region( dev, 1 );
     return -1;
   }
-  //siguienteLetra = 'A';
-  //init_waitqueue_head(&letras_waitqueue);
-  //static unsigned aux = ioread32((unsigned int*)i2c_mem);
- 
-	iowrite32(0x19,i2c_mem+0xb0);
+  
+  struct irq_data *irq_data = irq_get_irq_data(16); //tiro un valor de interrupcion conocida para obtener el dominio
+
+  unsigned int virq=irq_create_mapping(irq_data->domain,I2C1_IRQ); //mapeo la IRQ de HW a linux
+  printk( KERN_ALERT "El valor de VIRQ es %d!\n",virq );
+  
+  if(request_irq(virq,(irq_handler_t)i2c_td3_irq_handler,IRQF_TRIGGER_FALLING,"i2c_td3_handler",NULL)!=0)
+  {
+	  printk( KERN_ALERT "No se pudo obtener la linea de IRQ solicitada!\n" );
+	  cdev_del(&i2c_cdev);
+	  device_destroy( cl, dev );
+	  class_destroy( cl );
+      unregister_chrdev_region( dev, 1 );
+	  return -1;
+  }
+	  
+  
+	//iowrite32(0x19,i2c_mem+0xb0);
   printk(KERN_ALERT "Driver I2C_TD3 instalado con numero mayor %d y numero menor %d y se leyo %d\n",
 	 MAJOR(dev), MINOR(dev),i2c_mem);
 	 
@@ -339,6 +356,7 @@ static int i2c_init( void )
 static void i2c_exit( void )
 {
     // Borrar lo asignado para no tener memory leak en kernel
+  free_irq(I2C1_IRQ,NULL);
   cdev_del(&i2c_cdev);
   device_destroy( cl, dev );
   class_destroy( cl );
@@ -346,6 +364,18 @@ static void i2c_exit( void )
   iounmap(i2c_mem); //remuevo el mapeo
   //release_mem_region(I2C1_BASE_ADDR,I2C1_LENGTH); //devuelvo la memoria al kernel
   printk(KERN_ALERT "Driver I2C_TD3 desinstalado.\n");
+}
+
+static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs)
+{
+	static int veces = 0;
+	printk(KERN_ALERT "Se ejecuto la interrupcion %d veces \n",veces);
+	veces++;
+	iowrite32((1<<3),i2c_mem+I2C_IRQSTATUS);
+	if(veces > 5)
+	{iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_CLR);} //luego de 5 entradas deshabilito la interrupción
+	return (irq_handler_t) IRQ_HANDLED;
+ 
 }
 
 module_init(i2c_init);
