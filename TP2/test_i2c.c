@@ -21,14 +21,49 @@ int main(void)
 	{printf("No de pudo configurar la direccion del dispositivo esclavo \n");}	
 	else
 	{printf("Direccion de esclavo configurada de manera satisfactoria \n");}	
+
+	int i=0;
+	buff[0]=0;
+	write(fd,buff,1);
 	
+	for(i=0; i< 5; i++)
+	{
+		read(fd,buff,2);
+		temp= (buff[0] << 3)+(buff[1] >> 5);
+		temp= temp/8;
+		printf("La temperatura leida es %d \n",temp);
+	}
+	
+	
+	buff[0]=0;
+	write(fd,buff,1);
 	read(fd,buff,2);
 	
-	temp= (buff[0] << 3)+(buff[1] >> 5);
-	temp= temp/8;
+	temp=(buff[0]<<8)+buff[1];
+	{printf("La temperatura leida es %x \n",temp);}
 	
-	{printf("La temperatura leida es %d \n",temp);}
-	return 0;	
+	buff[0]=1;
+	write(fd,buff,1);
+	read(fd,buff,1);
+	
+	temp=buff[0];
+	{printf("El registro de configuracion es %x \n",temp);}
+	
+	buff[0]=2;
+	write(fd,buff,1);
+	read(fd,buff,2);
+	
+	temp=(buff[0]<<8)+buff[1];
+	{printf("La histeresis es %x \n",temp);}
+	
+	buff[0]=3;
+	write(fd,buff,1);
+	read(fd,buff,2);
+	
+	temp=(buff[0]<<8)+buff[1];
+	{printf("El umbral de sobretemperatura es %x \n",temp);}
+	
 
+	return 0;	
 
 }

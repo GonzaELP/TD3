@@ -75,6 +75,7 @@ static wait_queue_head_t letras_waitqueue;
 volatile unsigned int tCount;
 volatile unsigned int rCount;
 volatile unsigned char dataR[2];
+volatile unsigned char dataT[5];
 
 volatile unsigned int numOfBytes;
 
@@ -180,6 +181,8 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	
 	rCount=0; //limpio la cuenta de recepcion
 	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
+
+	while(!(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1 << 2))); //espero a que el i2c este listo para ser usado! (luego de una escritura)
 	
 	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
 	
@@ -216,8 +219,10 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 {
 	unsigned int aux=0;
 	
-	rCount=0; //limpio la cuenta de recepcion
+	tCount=0; //limpio la cuenta de recepcion
 	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
+	
+	__copy_from_user(dataT,buf,count);//copio a dataT lo que me manda el user para ser transmitido.
 	
 	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
 	
@@ -230,20 +235,17 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 	aux|=(1<<9); //lo coloco en TX
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	//Lo paso a MASTER RX
-	aux=ioread32(i2c_mem+I2C_CON);	
-	aux&=(~(1<<9)); // paso a RX.
-	iowrite32(aux,i2c_mem+I2C_CON);	
-	
 	//Habilito las INTERRUPCIONES relevantes
-	iowrite32( ((1<<3) | (1<<8)),i2c_mem+I2C_IRQENABLE_SET); //habilito las irq por recepcion lista (RRDY, 3) y por condicion de stop (BF,8)
+	iowrite32((1<<4),i2c_mem+I2C_IRQENABLE_SET); //habilito las irq por trasmision lista (XRDY, 4)
 	
 	//Coloco en el bus la condicion de START
 	aux=ioread32(i2c_mem+I2C_CON);
 	aux|=(1<<0);
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	while(!(rCount == numOfBytes));
+	while(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1<<12)); //mientras este encendido el bit de busy se queda aca
+	
+	while(!(tCount == numOfBytes));
 	
 	return count;
 }
@@ -374,7 +376,7 @@ static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct
 			iowrite32((1<<3),i2c_mem+I2C_IRQENABLE_CLR); //deshabilito la interrupción de recepción.
 			
 			unsigned int aux=ioread32(i2c_mem+I2C_CON);
-			aux|=(1<<1);//condicion de start
+			aux|=(1<<1);//condicion de STOP
 			iowrite32(aux,i2c_mem+I2C_CON);
 			
 		}
@@ -382,7 +384,14 @@ static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct
 	
 	if(status & (1<<4)) //interrupcion por XRDY
 	{
+		iowrite32(dataT[tCount],i2c_mem+I2C_DATA);
+		tCount++;
+		iowrite32((1<<4),i2c_mem+I2C_IRQSTATUS); //limpio el flag de interrupcion
 		
+		if(tCount==numOfBytes)
+		{
+			iowrite32((1<<4),i2c_mem+I2C_IRQENABLE_SET); //deshabilito la interrupcion de transmision
+		}
 	}
 		
 	return (irq_handler_t) IRQ_HANDLED;
