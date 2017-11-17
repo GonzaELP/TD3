@@ -23,6 +23,24 @@ int main(void)
 	{printf("Direccion de esclavo configurada de manera satisfactoria \n");}	
 
 	int i=0;
+
+	for(i=0; i < 20; i++)
+	{
+		buff[0]=3;
+		buff[1]=i;
+		buff[2]=0x00;
+		write(fd,buff,3);
+		
+		buff[0]=3;
+		write(fd,buff,1);
+		
+		read(fd,buff,2);
+	
+		temp=(buff[0]<<8)+buff[1];
+		{printf("El umbral de sobretemperatura es %x \n",temp);}
+	}
+	
+	
 	buff[0]=0;
 	write(fd,buff,1);
 	

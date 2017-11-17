@@ -1,14 +1,3 @@
-// Hecho por Dario Alpern
-
-// Escribir un caracter al device driver.
-// Luego en las siguientes lecturas el device driver
-// genera caracteres con codigo ASCII creciente.
-
-// Adicionalmente el driver genera el nodo /dev/letras
-// durante la instalacion (insmod) con permisos 0666 sin
-// necesidad del comando mknod ni chmod. El nodo se borra
-// automaticamente al desinstalar (rmmod) el device driver.
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -25,7 +14,7 @@
 #include <linux/sched.h>
 #include <asm/io.h>
 #include <linux/ioctl.h>
-#include <linux/irqdomain.h>
+#include <linux/irqdomain.h> //para poder mapear interrupciones fisicas al kernel
 #include <linux/interrupt.h> //para poder usar interrupciones!
 
 #define I2C1_BASE_ADDR 0x4802A000
@@ -60,47 +49,55 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("de Brito Gonzalo");
 MODULE_DESCRIPTION("Driver I2C para BBB");
 
-
-
 static dev_t dev;
 static struct class *cl; 
 
+/*Puntero a las direcciones virtuales asignadas por el kernel a los registros del I2C1*/
 static void __iomem* i2c_mem;
 
-static unsigned int virq; //valor que asigna linux a la interrupcion de interes
+/*Variable que contiene el numero de interrupcion asignado por el kernel*/
+static unsigned int virq; 
 
-static wait_queue_head_t letras_waitqueue;
+/*Colas de espera para la comunicacion I2C*/
+static wait_queue_head_t waitqueue_rx;
+static wait_queue_head_t waitqueue_tx;
+static wait_queue_head_t waitqueue_ardy;
 
-/*Cuenta de bytes enviados o recibidos*/
-volatile unsigned int tCount;
-volatile unsigned int rCount;
-volatile unsigned char dataR[2];
-volatile unsigned char dataT[5];
+/*Variables de la transmision I2C*/
+volatile unsigned int tCount; //numero de bytes transmitidos
+volatile unsigned int rCount; //numero de bytes recibidos
+volatile unsigned char dataR[2]; //buffer de recepcion
+volatile unsigned char dataT[5]; //buffer de tranmsision
+volatile unsigned int numOfBytes; //numero de bytes a enviar/recibir
+volatile unsigned int accessRdy=0; //flag de access ready
 
-volatile unsigned int numOfBytes;
-
+/*Prototipo del handler de la interrupcion I2C*/
 static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
  
 
 static int i2c_open(struct inode *i, struct file *f)
 {
-	printk(KERN_ALERT "ingreso al open \n");
+	//Variables auxiliares para leer/escribir registros
 	unsigned int a=0;
 	unsigned int b=0;
-	
+
+	/*Espacio de memoria correspondiente al control del clock del modulo I2C*/
 	void __iomem* p1 = ioremap(CM_PER_I2C1_CLKCTRL,4);
 	void __iomem* p2 = ioremap(CM_PER_L4LS_CLKCTRL,4);
-	void __iomem* p3 = ioremap(SOC_CONTROL_REGS+CONTROL_CONF_SPI0_D1,4);
-	void __iomem* p4 = ioremap(SOC_CONTROL_REGS+CONTROL_CONF_SPI0_CS0,4);
+	/*Espacio de memoria correspondiente al control del PinMux de los pines del modulo I2C1*/
+	void __iomem* p3 = ioremap(SOC_CONTROL_REGS+CONTROL_CONF_SPI0_D1,4); //SCL
+	void __iomem* p4 = ioremap(SOC_CONTROL_REGS+CONTROL_CONF_SPI0_CS0,4); //SDA
 	
+	/*Activacion del clkctrl del I2C1*/
 	a=ioread32((unsigned int*) p1);
 	iowrite32((a | (0x02) & (~(0x01))),p1);
-		
+	/*Activacion del L4LS, tambien necesario*/
 	a=ioread32((unsigned int*) p2);
 	iowrite32((a | (0x02) & (~(0x01))),p2);
 	
-	a= ((1<<4) | (1<<5) | (1<<6) | (0x02));
+	/*Confguracion de los pines, los dos van igual*/
 	/*Seteo: 1) Pullup 2)Pin como receiver enabled, 3)Slewrate lento, 4) MUX 2, es decir I2C SDA y SCL */
+	a= ((1<<4) | (1<<5) | (1<<6) | (0x02));
 	iowrite32(a,p3);
 	iowrite32(a,p4);
 	
@@ -110,10 +107,12 @@ static int i2c_open(struct inode *i, struct file *f)
 	iounmap(p3);
 	iounmap(p4);
 	
+	/*Deshabilito el modulo mientras configuro los registros de clock*/
 	unsigned int aux = ioread32(i2c_mem+I2C_CON); //resguardo el valor original del registro de control
 	aux &= (~(1 << 15)); //deshabilito el modulo I2C_EN = 0
 	iowrite32(aux,i2c_mem+I2C_CON); //grabo el valor ya modificado
 	
+	/*Configuro el preescaler para obtener un Clock de "alimentacion" del modulo de 12Mhz aprox*/
 	iowrite32 (0x03,i2c_mem+I2C_PSC); //escribo un 3, de esta manera dividirá por 4 (48Mhz/12Mhz = 4).
  	if( ioread32(i2c_mem+0xb0) != 0x03) //leo para verificar que se escribio bien
 	{
@@ -121,6 +120,7 @@ static int i2c_open(struct inode *i, struct file *f)
 		return -1;
 	}
 	
+	/*Configuro el tiempo de pulso en bajo (SCLL) y en alto (SCLH) para obtener una salida a 100kHz*/
 	iowrite32(0x71,i2c_mem+I2C_SCLL); // 12Mhz (Clock del modulo) / 0.1Mhz (100khz, clock del i2c) = 120 - 7 =113. El 7 lo pide el micro (ver datasheet) 
 	if( ioread32(i2c_mem+I2C_SCLL) != 0x71)
 	{
@@ -135,14 +135,19 @@ static int i2c_open(struct inode *i, struct file *f)
 		return -1;
 	}
 	
+	/*Finalmente habilito el módulo*/
 	aux = ioread32(i2c_mem+I2C_CON); //resguardo el valor original del registro de control
 	aux |= (1 << 15); //Habilito el modulo I2C_EN = 0
 	iowrite32(aux,i2c_mem+I2C_CON); //grabo el valor ya modificado
 	
+	iowrite32((1<<2),i2c_mem+I2C_IRQSTATUS_RAW); 
+	//la primera vez disparo adrede una interrupcion de ardy para entrar en el ciclo!. Luego de las lecturas y escrituras comenzara a entrar solo!
 	
-	printk(KERN_ALERT "Modulo HW I2C inicializado correctamente");
+	/*Pongo en el log de kernel un mensaje de correcta apertura*/
+	printk(KERN_ALERT "Modulo HW I2C1 abierto correctamente");
     return 0;
 }
+
 static int i2c_release(struct inode *i, struct file *f)
 {
 	printk(KERN_ALERT "Se hace el release del i2c \n");
@@ -168,7 +173,6 @@ long i2c_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	
 	printk(KERN_ALERT "Opcion de IOCTL desconocida \n");
 	return -1;
-
 }
 /*static int i2c_ioctl(struct inode *n, struct file *fp, unsigned int a, unsigned long b)
 {
@@ -180,9 +184,15 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	unsigned int aux=0;
 	
 	rCount=0; //limpio la cuenta de recepcion
-	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
-
-	while(!(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1 << 2))); //espero a que el i2c este listo para ser usado! (luego de una escritura)
+	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir 
+	
+	iowrite32((1<<2),i2c_mem+I2C_IRQENABLE_SET); //habilito la interrupcion por Access Ready
+	
+	if(wait_event_interruptible(waitqueue_ardy, (accessRdy))) //pongo a dormir que se pueda acceder al modulo i2c nuevamente
+	{
+		return -ERESTARTSYS; //vino una señal sino devuelve cero!
+	}
+	accessRdy=0; //pongo en cero el flag de accessRdy. 
 	
 	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
 	
@@ -208,11 +218,22 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	aux|=(1<<0);
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	while(!(rCount == numOfBytes));
+	if(wait_event_interruptible(waitqueue_rx, (rCount==numOfBytes))) //pongo a dormir hasta que la condicion evaluada sea true
+	{
+		return -ERESTARTSYS; //vino una señal sino devuelve cero!
+	}
 	
-	__copy_to_user(buf,dataR,count); //copio el buffer al usuario
+	//while(!(rCount == numOfBytes));
 	
-	return count;
+	
+	if(__copy_to_user(buf,dataR,count)) //copio el buffer al usuario
+	{
+		//si devuelve algo distinto de 0 es que no se pudo copiar todo al buffer de kernel!
+		printk(KERN_ALERT "Error NO se pudo copiar la totalidad de los bytes al buffer de usuario\n");
+		return -ERESTARTSYS;
+	}
+	
+	 return count; //sino, devuelvo la cantidad de bytes leidos
 }
 	
 static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t *nose)
@@ -222,8 +243,21 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 	tCount=0; //limpio la cuenta de recepcion
 	numOfBytes=count; // coloco en la cuenta el número de bytes a recibir
 	
-	__copy_from_user(dataT,buf,count);//copio a dataT lo que me manda el user para ser transmitido.
+	if(__copy_from_user(dataT,buf,count))//copio a dataT lo que me manda el user para ser transmitido.
+	{
+		//si devuelve algo distinto de 0 es que no se pudo copiar todo al buffer de kernel!
+		printk(KERN_ALERT "Error NO se pudo copiar la totalidad de los bytes al buffer de kernel\n");
+		return -ERESTARTSYS;
+	}
 	
+	iowrite32((1<<2),i2c_mem+I2C_IRQENABLE_SET); //habilito la interrupcion por Access Ready
+	
+	if(wait_event_interruptible(waitqueue_ardy, (accessRdy))) //pongo a dormir que se pueda acceder al modulo i2c nuevamente
+	{
+		return -ERESTARTSYS; //vino una señal sino devuelve cero!
+	}
+	accessRdy=0; //pongo en cero el flag de accessRdy. 
+			
 	iowrite32(count,i2c_mem+I2C_CNT); //seteo la cuenta de recepcion en el valor que corresponda.
 	
 	iowrite32(0x6FFF,i2c_mem+I2C_IRQSTATUS);  //limpio el registro de estado de interrupciones
@@ -243,9 +277,12 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 	aux|=(1<<0);
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	while(ioread32(i2c_mem+I2C_IRQSTATUS_RAW) & (1<<12)); //mientras este encendido el bit de busy se queda aca
+	if(wait_event_interruptible(waitqueue_tx, (tCount==numOfBytes))) //pongo a dormir hasta que la condicion evaluada sea true
+	{
+		return -ERESTARTSYS; //vino una señal sino devuelve cero!
+	}
 	
-	while(!(tCount == numOfBytes));
+	//while(!(tCount == numOfBytes));
 	
 	return count;
 }
@@ -336,13 +373,15 @@ static int i2c_init( void )
       unregister_chrdev_region( dev, 1 );
 	  return -1;
   }
-	  
   
-	//iowrite32(0x19,i2c_mem+0xb0);
+  //Inicializo las colas de espera de tx ,rx y ardy
+  init_waitqueue_head(&waitqueue_rx);
+  init_waitqueue_head(&waitqueue_tx);
+  init_waitqueue_head(&waitqueue_ardy);
+	  
   printk(KERN_ALERT "Driver I2C_TD3 instalado con numero mayor %d y numero menor %d y se leyo %d\n",
 	 MAJOR(dev), MINOR(dev),i2c_mem);
-	 
-	 
+	 	 
   return 0;
 }
 
@@ -379,6 +418,8 @@ static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct
 			aux|=(1<<1);//condicion de STOP
 			iowrite32(aux,i2c_mem+I2C_CON);
 			
+			wake_up_interruptible(&waitqueue_rx);
+			
 		}
 	}
 	
@@ -390,8 +431,23 @@ static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct
 		
 		if(tCount==numOfBytes)
 		{
-			iowrite32((1<<4),i2c_mem+I2C_IRQENABLE_SET); //deshabilito la interrupcion de transmision
+			iowrite32((1<<4),i2c_mem+I2C_IRQENABLE_CLR); //deshabilito la interrupcion de transmision
+			
+			unsigned int aux=ioread32(i2c_mem+I2C_CON);
+			aux|=(1<<1);//condicion de STOP
+			iowrite32(aux,i2c_mem+I2C_CON);
+			
+			wake_up_interruptible(&waitqueue_tx);
 		}
+	}
+	
+	if(status & (1<<2)) //interrupcion por Access RDY
+	{
+		printk(KERN_ALERT "Pude entrar a la int ardy \n");
+		iowrite32((1<<2),i2c_mem+I2C_IRQSTATUS); //limpio el flag de estado
+		iowrite32((1<<2),i2c_mem+I2C_IRQENABLE_CLR); //deshabilito la interrupcion de ARDY
+		accessRdy=1; //pongo en 1 el flag accessRdy
+		wake_up_interruptible(&waitqueue_ardy); //despierto la cola correspondiente
 	}
 		
 	return (irq_handler_t) IRQ_HANDLED;
