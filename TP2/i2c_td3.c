@@ -17,9 +17,11 @@
 #include <linux/irqdomain.h> //para poder mapear interrupciones fisicas al kernel
 #include <linux/interrupt.h> //para poder usar interrupciones!
 
+/*Base y longitud del juego de registros del modulo I2C1*/
 #define I2C1_BASE_ADDR 0x4802A000
 #define I2C1_LENGTH 0x1000
 
+/*OFFSETS de los registros del modulo I2C*/
 #define I2C_IRQSTATUS_RAW 0x24
 #define I2C_IRQSTATUS 0x28
 #define I2C_IRQENABLE_SET 0x2C
@@ -33,22 +35,27 @@
 #define I2C_DATA 0x9C
 #define I2C_BUFSTAT 0xC0
 
+/*Numero de IRQ del modulo I2C1*/
 #define I2C1_IRQ (71)
 
-
+/*Registros de habilitacion y control del clock del modulo I2C*/
 #define CM_PER_I2C1_CLKCTRL 0x44E00048
 #define CM_PER_L4LS_CLKCTRL 0x44E00000
 
+/*Registro de control y offsets para la configuracion del PinMux para usar el I2C1*/
 #define SOC_CONTROL_REGS 0x44E10000
 #define CONTROL_CONF_SPI0_D1  0x958
 #define CONTROL_CONF_SPI0_CS0   0x95C
 
+/*Numero de comando de IOCTL para setear la direccion del esclavo. Se usa este numero
+ya que es el mismo que usa la direccion de */
 #define I2C_SLAVE 0x0703 //define para setear la direccion del esclavo. 
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("de Brito Gonzalo");
 MODULE_DESCRIPTION("Driver I2C para BBB");
 
+/*Variables de clase y device utilizadas para el init del driver en kernel*/
 static dev_t dev;
 static struct class *cl; 
 
@@ -63,7 +70,7 @@ static wait_queue_head_t waitqueue_rx;
 static wait_queue_head_t waitqueue_tx;
 static wait_queue_head_t waitqueue_ardy;
 
-/*Variables de la transmision I2C*/
+/*Variables de la comunicacion I2C*/
 volatile unsigned int tCount; //numero de bytes transmitidos
 volatile unsigned int rCount; //numero de bytes recibidos
 volatile unsigned char dataR[2]; //buffer de recepcion
@@ -74,6 +81,7 @@ volatile unsigned int accessRdy=0; //flag de access ready
 /*Prototipo del handler de la interrupcion I2C*/
 static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct pt_regs *regs);
  
+
 
 static int i2c_open(struct inode *i, struct file *f)
 {
@@ -156,11 +164,12 @@ static int i2c_release(struct inode *i, struct file *f)
 
 
 long i2c_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
-{
-	printk(KERN_ALERT "Ingreso al IOCTL I2C_TD3\n");
-	
+{	
+	/*Para los objetivos del TP la unica config que me interesa establecer 
+	 es la direccion del esclavo, por esto solo admito este comando*/
 	if(cmd == I2C_SLAVE)
 	{
+		/*Escribo la slave addr y verifico que se haya escrito el valor correcto*/
 		iowrite32((arg & (0x7F)),i2c_mem+I2C_SA); //escribo la slave address dejando solo los 7 LSB con algo y el resto limpio (ya que usare addr de 7bits)
 		if( ioread32(i2c_mem+I2C_SCLH) != 0x73)
 		{
@@ -174,13 +183,11 @@ long i2c_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	printk(KERN_ALERT "Opcion de IOCTL desconocida \n");
 	return -1;
 }
-/*static int i2c_ioctl(struct inode *n, struct file *fp, unsigned int a, unsigned long b)
-{
-	return 0;
-}*/
+
 
 static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose)
 {
+	//Variable auxiliar para la lectura/escritura de registros
 	unsigned int aux=0;
 	
 	rCount=0; //limpio la cuenta de recepcion
@@ -205,7 +212,7 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	aux|=(1<<9); //lo coloco en TX
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	//Lo paso a MASTER RX
+	//Lo paso a MASTER RX ya que segun datasheet solo puedo entrar en Master RX a partir de Master TX
 	aux=ioread32(i2c_mem+I2C_CON);	
 	aux&=(~(1<<9)); // paso a RX.
 	iowrite32(aux,i2c_mem+I2C_CON);	
@@ -218,15 +225,14 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	aux|=(1<<0);
 	iowrite32(aux,i2c_mem+I2C_CON);
 	
-	if(wait_event_interruptible(waitqueue_rx, (rCount==numOfBytes))) //pongo a dormir hasta que la condicion evaluada sea true
+	//pongo a dormir hasta que se hayan leido todos los bytes
+	if(wait_event_interruptible(waitqueue_rx, (rCount==numOfBytes))) 
 	{
 		return -ERESTARTSYS; //vino una señal sino devuelve cero!
-	}
+	}	
 	
-	//while(!(rCount == numOfBytes));
-	
-	
-	if(__copy_to_user(buf,dataR,count)) //copio el buffer al usuario
+	//copio lo leido al buffer de usuario
+	if(__copy_to_user(buf,dataR,count)) 
 	{
 		//si devuelve algo distinto de 0 es que no se pudo copiar todo al buffer de kernel!
 		printk(KERN_ALERT "Error NO se pudo copiar la totalidad de los bytes al buffer de usuario\n");
@@ -287,6 +293,7 @@ static ssize_t i2c_write(struct file *file, const char *buf,size_t count, loff_t
 	return count;
 }
 
+//Estructura file operations del diver i2c
 struct file_operations i2c_fops =
 {
   .owner= THIS_MODULE,
@@ -297,6 +304,7 @@ struct file_operations i2c_fops =
   .release= i2c_release,  
 };
 
+//Dispositivo de caracteres del driver i2c
 static struct cdev i2c_cdev;
 
 static int my_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
@@ -307,25 +315,22 @@ static int my_dev_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 static int i2c_init( void )
 {
-	//Puedo prescindir de esta parte... 
-  /*if(request_mem_region(I2C1_BASE_ADDR,I2C1_LENGTH,"i2c_td3")==NULL)
-  {
-	  printk(KERN_ALERT "Region de memoria solicitada NO DISPONIBLE \n");
-	  return -1;
-  }*/
-  
+/*Pido al kernel direcciones virtuales que mapeen a las direcciones fisicas del modulo I2C1
+ NO hago el request_mem_region() ya que esta ocupado por el driver original... */
   if ((	i2c_mem = ioremap(I2C1_BASE_ADDR, I2C1_LENGTH)) == NULL)
     {
         printk(KERN_ERR "Error al mapear el puerto I2C1\n");
         return -1;
     }
-  
+	
+  /*Ubico una region de device de caracteres para el modulo I2C*/
   if (alloc_chrdev_region( &dev, 0, 1, "i2c_td3" ) < 0)
   {  
     printk( KERN_ALERT "No se puede ubicar la region\n" );
     return -1;
   }
 
+  /*Creo la clase*/
   if ( (cl=class_create( THIS_MODULE, "chardev" )) == NULL )
   {
     printk( KERN_ALERT "No se pudo crear la clase\n" );
@@ -336,6 +341,8 @@ static int i2c_init( void )
   
   // Asignar el callback que pone los permisos en /dev/letras
   //cl -> dev_uevent = my_dev_uevent;
+  
+  /*Creo el dispositivo en el kernel el dispositivo i2c*/
   if( device_create( cl, NULL, dev, NULL, "i2c_td3" ) == NULL )
   {
     printk( KERN_ALERT "No se puede crear el device driver\n" );
@@ -344,11 +351,14 @@ static int i2c_init( void )
     unregister_chrdev_region( dev, 1 );
     return -1;
   }
+  
+  /*Inicializo el dispositivo de caracteres y su correspondiente estructura file operations*/
   cdev_init(&i2c_cdev, &i2c_fops);
   
   i2c_cdev.owner = THIS_MODULE;
   i2c_cdev.ops = &i2c_fops;
   
+  /*Lo agrego al kernel*/
   if (cdev_add(&i2c_cdev, dev, 1) == -1)
   {
     printk( KERN_ALERT "No se pudo agregar el device driver e i2c al kernel\n" );
@@ -359,11 +369,15 @@ static int i2c_init( void )
     return -1;
   }
   
-  struct irq_data *irq_data = irq_get_irq_data(16); //tiro un valor de interrupcion conocida para obtener el dominio
-
-  virq=irq_create_mapping(irq_data->domain,I2C1_IRQ); //mapeo la IRQ de HW a linux
-  printk( KERN_ALERT "El valor de VIRQ es %d!\n",virq );
+  /*Como no uso device tree, necesito obtener un puntero al dominio del controlador de interrupciones (INTC).
+	Para ello, obtengo la información del dominio a partir de la interrupcion 16 que siempre aparece en el kernel.*/
+  struct irq_data *irq_data = irq_get_irq_data(16); 
   
+  /*Luego, con este dominio, creo un mapeo a numero de interrupcion de linux, de la interrupcion de HW del INTC correspondiente
+    a la linea de interrupcion del modulo I2C!*/
+  virq=irq_create_mapping(irq_data->domain,I2C1_IRQ); //mapeo la IRQ de HW a linux
+
+  /*Finalmente, pido al kernel que me de la interrupcion*/
   if(request_irq(virq,(irq_handler_t)i2c_td3_irq_handler,IRQF_TRIGGER_FALLING,"i2c_td3_handler",NULL)!=0)
   {
 	  printk( KERN_ALERT "No se pudo obtener la linea de IRQ solicitada!\n" );
@@ -374,7 +388,7 @@ static int i2c_init( void )
 	  return -1;
   }
   
-  //Inicializo las colas de espera de tx ,rx y ardy
+  //Inicializo las colas de espera de tx ,rx y ardy.
   init_waitqueue_head(&waitqueue_rx);
   init_waitqueue_head(&waitqueue_tx);
   init_waitqueue_head(&waitqueue_ardy);
@@ -394,7 +408,6 @@ static void i2c_exit( void )
   class_destroy( cl );
   unregister_chrdev_region(dev, 1);
   iounmap(i2c_mem); //remuevo el mapeo
-  //release_mem_region(I2C1_BASE_ADDR,I2C1_LENGTH); //devuelvo la memoria al kernel
   printk(KERN_ALERT "Driver I2C_TD3 desinstalado.\n");
 }
 
