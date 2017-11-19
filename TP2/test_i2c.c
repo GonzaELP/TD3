@@ -1,4 +1,12 @@
-// Hecho por Dario Alpern
+/*
+Hecho por Gonzalo de Brito.
+Aplicacion basica para probar las opciones, la lectura y escritura del sensor de temperatura
+LM75B mediante el driver de I2C1.
+
+*/
+
+
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
