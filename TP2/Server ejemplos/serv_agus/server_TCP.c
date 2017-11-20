@@ -210,6 +210,7 @@ int main(int argc, char *argv[])
  {
   perror("Error en attach de memoria compartida en proceso padre");
   exit(EXIT_FAILURE);
+  
  }
 
  pshmem = (SMem *) ShMemAddr; //Tengo un puntero a la direccion de memoria compartida para la temperatura

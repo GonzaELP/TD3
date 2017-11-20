@@ -11,15 +11,44 @@
 #include <sys/wait.h> //para wait y waitpid
 #include <sys/stat.h> // para las funciones de archivos
 #include <fcntl.h>
+#include <sys/ipc.h> // para poder usar el System V IPC
+#include <sys/shm.h> //para poder usar shared memory
+#include <sys/sem.h> //para poder utilizar semaforos
 
 #define MAX_CONN 10 //Nro maximo de conexiones en espera
 
 #define DEFAULT_PORT 8000
-
+#define T_GET_TEMP 1
+#define CANT_TEMPS_MEAN 5
 
 #define IMG_PATH "./img/utn.png"
+#define KEY_PATH "./key/arch.txt"
+
+#define SHM_FLG (0666 | IPC_CREAT)
+
+#define CANT_SEMS 1
+#define SEM_FLG (0666 | IPC_CREAT | IPC_EXCL)
+
+typedef struct temps
+{
+	float tempMax;
+	float tempMin;
+	float tempMean;
+	float temps[5];
+}Temps;
+
+Temps* ShMemTemps; 
+void fTempChild(void);
 
 
+/*El MAN de SEMCTL pide que se defina esta union!*/
+union semun {
+               int              val;    /* Value for SETVAL */
+               struct semid_ds *buf;    /* Buffer for IPC_STAT, IPC_SET */
+               unsigned short  *array;  /* Array for GETALL, SETALL */
+               struct seminfo  *__buf;  /* Buffer for IPC_INFO
+                                           (Linux-specific) */
+           };
 
 int genMsg(char**,char*, char*, char*,int);
 int genBadResourceMsg(char**);
@@ -28,7 +57,7 @@ int genPageMsg(char**);
 int genImgMsg(char**);
 
 void HandlerSIGCHLD(int);
-
+void HandlerSIGINT(int);
 
 char httpGet[]="GET"; //Metodo GET. Para comprobar si me envia un metodo INVALIDO y dar error 400
 //Posibles recursos "/" (root) o "/img/utn.png". Sino es alguno de estos dos, debo dar "bad resource"
@@ -48,7 +77,7 @@ char htmlPage[]="<!DOCTYPE html>\
 						<body>\
 							<h1>My First Heading</h1>\
 								<p>My first paragraph.</p>\
-							<h2> \
+							<h2>\
 								<div align=\"center\" style=\"padding: 10px\">\
 									<img src=\"img/utn.png\" alt=\"logo\" width=\"900\" height=\"300\" border=\"3\">\
 								</div>\
@@ -87,11 +116,86 @@ int main(int argc, char *argv[])
   char ipAddr[20];
   int Port;
   int numChilds=0;
+  pid_t pidTempProc;
   socklen_t addrlen;
-
+  
+  
+  
+  /*Variables para gestion de la Memoria compartida*/
+  int ShMemID; 
+  key_t ShMemKey;
+  
+  /*Variables para el control de los semaforos*/
+  int SemID;
+  key_t SemKey;
+  union semctl SemArg;
+  struct sembuf SemBuf;
+  SemBuf.sem_num=0; //numero de semaforo 0
+  SemBuf.sem_op=-1; //arranca LOCKED 
+  SemBuf.sem_flg=0;
+  
   if (argc == 2)
   {
 	  signal (SIGCHLD, HandlerSIGCHLD);
+	  signal (SIGINT, HandlerSIGINT);
+	  
+	  /*Creacion e Inicializacion de la SHARED MEMORY*/
+	  if((ShMemKey=ftok(KEY_PATH,'A'))<0)
+	  {
+		  printf("Error al crear la llave de la memoria compartida \n");
+		  exit(1);
+	  }
+	  
+	 if((ShMemID=shmget(ShMemID,sizeof(Temps),SHM_FLG))<0)
+	 {
+		 printf("Error obtener el ID de la memoria compartida\n");
+		 exit(1);
+	 }
+	 
+	 if((ShMemTemps=(Temps*)shmat(ShMemID,NULL,0)) < 0)
+	 {
+		 printf("Error al intentar attachear la memoria\n");
+		 exit(1);
+	 }
+	 
+	 /*Creacion e inicializacion del SEMAFORO*/
+	 if((SemKey=ftok(KEY_PATH,'Z'))<0) //creo la llave del semaforo
+	 {
+		  perror("Error al crear la llave del semaforo \n");
+		  exit(1);
+	 }
+	 
+	 if((SemID=semget(SemKey,CANT_SEMS,SEM_FLG)) < 0) //Creo el semaforo
+	 {
+		 perror("Error al intentar obtener el ID del semaforo \n");
+		 exit(1);
+	 }
+	 
+	 SemArg.val=1;
+	 if (semctl(SemID, 0, SETVAL, SemArg) == -1) 
+	 {
+            perror("Error al intentar configurar el semaforo \n");
+            exit(1);
+	}
+	 
+	 
+	 if((forkRetVal=fork()) < 0)
+	 {
+		printf("Error al intentar attachear la memoria\n");
+		exit(1);
+	 }
+	 if(forkRetVal==0) //proceso hijo de lectura de temperatura
+	 {
+		 fTempChild();
+		 exit(1);
+	 }
+	 
+	 else
+	 {
+		//me guardo el PID del proceso que lee la temperatura para matarlo al final!
+		pidTempProc=forkRetVal; 
+	 }
+	
     //Se crea el socket
     sockServer = socket(AF_INET, SOCK_STREAM,0);
 	
@@ -192,6 +296,11 @@ int main(int argc, char *argv[])
         }
         // Cierra el servidor
         close(sockServer);
+		kill(pidTempProc,SIGKILL);
+		
+		shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
+		
       }
       else
       {
@@ -209,6 +318,67 @@ int main(int argc, char *argv[])
   }
   return 0;
 }
+
+
+void fTempChild(void)
+{
+	int i=0;
+	int j=0;
+	float acum=0.0;
+	float tempLeida=0.0;
+	
+	SemBuf.sem_op=-1; //Lockeo el semaforo
+	if(semop(
+	
+	/*Inicializo las estructuras de memoria compartida*/
+	for(i=0; i<CANT_TEMPS_MEAN; i++)
+	{ShMemTemps->temps[i]=0.0;}
+
+	ShMemTemps->tempMax=0.0;
+	ShMemTemps->tempMin=0.0;
+	ShMemTemps->tempMean=0.0;
+	
+	i=0;
+	
+	while(1)
+	{
+		if(i < CANT_TEMPS_MEAN)
+		{
+			tempLeida=(rand()%30);
+			ShMemTemps->temps[i]=tempLeida;
+			i++;
+		}
+		else //si ya llene mas de las cuentas.
+		{
+			for(j=0; j<(CANT_TEMPS_MEAN-1); j++)
+			{
+				ShMemTemps->temps[j]=ShMemTemps->temps[j+1];
+			}
+			tempLeida=(rand()%30);
+			ShMemTemps->temps[j]=tempLeida;
+		}
+		
+		/*Actualizo el valor del MAXIMO*/
+		if(tempLeida > ShMemTemps->tempMax)
+		{ShMemTemps->tempMax=tempLeida;}
+	
+		/*Actualizo el valor del MINIMO*/
+		if(tempLeida < ShMemTemps->tempMin)
+		{ShMemTemps->tempMin=tempLeida;}
+		
+		/*Calculo de la media Movil*/
+		for(j=0;j<CANT_TEMPS_MEAN;j++)
+		{acum+=ShMemTemps->temps[j];}
+		ShMemTemps->tempMean=(acum/CANT_TEMPS_MEAN);
+		acum=0.0; //limpio la variable de acumulacion para la proxima vuelta
+		
+		printf("Temperatura media %f, temperatura maxima: %f, temperatura minima %f \n",ShMemTemps->tempMean,ShMemTemps->tempMax,ShMemTemps->tempMin);
+		sleep(T_GET_TEMP);
+			
+	}
+	
+}
+
 
 
 int genBadResourceMsg(char** pMsg)
@@ -255,7 +425,6 @@ int genImgMsg(char** pMsg)
 		exit(1);
 	}
 	
-	//buff[filelength]='\0'; //agrego el caracter nulo para poder ver el tamaño con strlen()
 	close(fd);
 	
 	tot_size=genMsg(pMsg,httpOk,httpImgHeader,buff,filelength);
@@ -339,6 +508,12 @@ int genMsg(char** pDest, char* method, char* header, char* html,int imgLen)
 	return tot_size;
 	
 }
+
+void HandlerSIGINT(int signum)
+{
+	exit(1);
+}
+
 
 void HandlerSIGCHLD(int signum)
 {
