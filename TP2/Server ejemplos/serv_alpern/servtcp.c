@@ -29,6 +29,14 @@
 #define CANT_SEMS 1
 #define SEM_FLG (0666 | IPC_CREAT | IPC_EXCL)
 
+#define TEMPF_MAX_CHARS 6 //cantidad maxima posible de caracteres para un float con 2 decimales. Ej: -120.02 
+
+#define SERV_ON 1
+#define SERV_OFF 0
+
+int serverRunning=SERV_OFF;
+
+
 typedef struct temps
 {
 	float tempMax;
@@ -37,8 +45,8 @@ typedef struct temps
 	float temps[5];
 }Temps;
 
-Temps* ShMemTemps; 
-void fTempChild(void);
+Temps* ShMemTemps;
+void fTempChild(int, struct sembuf*);
 
 
 /*El MAN de SEMCTL pide que se defina esta union!*/
@@ -74,10 +82,10 @@ char httpImgHeader[]="Content-Type: image/png\nContent-Length: "; //valido para 
 char htmlPage[]="<!DOCTYPE html>\
 					<meta http-equiv=\"refresh\" content=\"1\">\
 					<html>\
-						<body>\
-							<h1>My First Heading</h1>\
-								<p>My first paragraph.</p>\
-							<h2>\
+						<body style=\"background-color: #424242;\">\
+							<h1 style=\"color: #0000CC;text-align: center;\">Tecnicas Digitales III</h1>\
+							<h2 style=\"color: #0000CC;text-align: center;\">TP Nº2: Web server concurrente y driver i2c para BBB </h2>\
+							<h2 style=\"color: #0000CC;text-align: center;\">-2017-</h2>\
 								<div align=\"center\" style=\"padding: 10px\">\
 									<img src=\"img/utn.png\" alt=\"logo\" width=\"900\" height=\"300\" border=\"3\">\
 								</div>\
@@ -87,7 +95,7 @@ char htmlPage[]="<!DOCTYPE html>\
 
 char htmlBadResource[]="<!DOCTYPE html>\
 								<html>\
-									<body>\
+									<body style=\"background-color: #424242;\">\
 										<h1>Error 404</h1>\
 											<p>Bad Resource</p>\
 									</body>\
@@ -95,7 +103,7 @@ char htmlBadResource[]="<!DOCTYPE html>\
 
 char htmlBadMethod[]="<!DOCTYPE html>\
 								<html>\
-									<body>\
+									<body style=\"background-color: #424242;\">\
 										<h1>Error 400</h1>\
 											<p>Bad Method</p>\
 									</body>\
@@ -118,9 +126,7 @@ int main(int argc, char *argv[])
   int numChilds=0;
   pid_t pidTempProc;
   socklen_t addrlen;
-  
-  
-  
+    
   /*Variables para gestion de la Memoria compartida*/
   int ShMemID; 
   key_t ShMemKey;
@@ -128,7 +134,7 @@ int main(int argc, char *argv[])
   /*Variables para el control de los semaforos*/
   int SemID;
   key_t SemKey;
-  union semctl SemArg;
+  union semun SemArg;
   struct sembuf SemBuf;
   SemBuf.sem_num=0; //numero de semaforo 0
   SemBuf.sem_op=-1; //arranca LOCKED 
@@ -154,39 +160,53 @@ int main(int argc, char *argv[])
 	 
 	 if((ShMemTemps=(Temps*)shmat(ShMemID,NULL,0)) < 0)
 	 {
-		 printf("Error al intentar attachear la memoria\n");
-		 exit(1);
+		shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
+		printf("Error al intentar attachear la memoria\n");
+		exit(1);
 	 }
 	 
 	 /*Creacion e inicializacion del SEMAFORO*/
 	 if((SemKey=ftok(KEY_PATH,'Z'))<0) //creo la llave del semaforo
 	 {
+		  shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		  shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
 		  perror("Error al crear la llave del semaforo \n");
 		  exit(1);
 	 }
 	 
 	 if((SemID=semget(SemKey,CANT_SEMS,SEM_FLG)) < 0) //Creo el semaforo
 	 {
-		 perror("Error al intentar obtener el ID del semaforo \n");
+		 shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		 shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
+		 perror("Error al intentar obtener el ID del semaforo");
 		 exit(1);
 	 }
 	 
 	 SemArg.val=1;
 	 if (semctl(SemID, 0, SETVAL, SemArg) == -1) 
 	 {
-            perror("Error al intentar configurar el semaforo \n");
-            exit(1);
+		 semctl(SemID,0,IPC_RMID); //elimino el semaforo
+		 shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		 shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
+		 perror("Error al intentar configurar el semaforo");
+         exit(1);
 	}
 	 
 	 
 	 if((forkRetVal=fork()) < 0)
 	 {
+		semctl(SemID,0,IPC_RMID); //elimino el semaforo
+		shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida 
 		printf("Error al intentar attachear la memoria\n");
 		exit(1);
 	 }
 	 if(forkRetVal==0) //proceso hijo de lectura de temperatura
 	 {
-		 fTempChild();
+		 fTempChild(SemID, &SemBuf);
+		 semctl(SemID,0,IPC_RMID); //elimino el semaforo
+		 shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+		 shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
 		 exit(1);
 	 }
 	 
@@ -225,7 +245,9 @@ int main(int argc, char *argv[])
           exit(1);
         }
         // Permite atender a multiples usuarios
-        while (1)
+		serverRunning=SERV_ON;
+		
+        while (serverRunning)
         {
   
           // La funcion accept rellena la estructura address con informacion
@@ -296,10 +318,9 @@ int main(int argc, char *argv[])
         }
         // Cierra el servidor
         close(sockServer);
-		kill(pidTempProc,SIGKILL);
+		printf("Cerre el server\n");
 		
-		shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
-		shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
+		
 		
       }
       else
@@ -316,19 +337,25 @@ int main(int argc, char *argv[])
   {
     printf("\n\nLinea de comandos: servtcp Puerto\n\n");
   }
+  kill(pidTempProc,SIGKILL);
+  semctl(SemID,0,IPC_RMID); //elimino el semaforo
+  shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
+  shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
   return 0;
 }
 
 
-void fTempChild(void)
+void fTempChild(int SemID, struct sembuf* SemBuf )
 {
 	int i=0;
 	int j=0;
 	float acum=0.0;
 	float tempLeida=0.0;
 	
-	SemBuf.sem_op=-1; //Lockeo el semaforo
-	if(semop(
+	/*Tomo el semaforo para escribir la memoria compartida!*/
+	SemBuf->sem_op=-1; //Lockeo el semaforo
+	if(semop(SemID,SemBuf,1) < 0)
+	{perror("Error en semop de shared mem 1 \n");}
 	
 	/*Inicializo las estructuras de memoria compartida*/
 	for(i=0; i<CANT_TEMPS_MEAN; i++)
@@ -338,10 +365,19 @@ void fTempChild(void)
 	ShMemTemps->tempMin=0.0;
 	ShMemTemps->tempMean=0.0;
 	
+	SemBuf->sem_op=1; //unlockeo el semaforo
+	if(semop(SemID,SemBuf,1) < 0)
+	{perror("Error en semop de shared mem 2 \n");}
+	
 	i=0;
 	
 	while(1)
 	{
+		//Tomo el semaforo para operar sobre la shared MEM
+		SemBuf->sem_op=-1; //lockeo el semaforo
+		if(semop(SemID,SemBuf,1) < 0)
+		{perror("Error en semop de shared mem 3 \n");}
+		
 		if(i < CANT_TEMPS_MEAN)
 		{
 			tempLeida=(rand()%30);
@@ -372,7 +408,10 @@ void fTempChild(void)
 		ShMemTemps->tempMean=(acum/CANT_TEMPS_MEAN);
 		acum=0.0; //limpio la variable de acumulacion para la proxima vuelta
 		
-		printf("Temperatura media %f, temperatura maxima: %f, temperatura minima %f \n",ShMemTemps->tempMean,ShMemTemps->tempMax,ShMemTemps->tempMin);
+		SemBuf->sem_op=1; //unlockeo el semaforo
+		if(semop(SemID,SemBuf,1) < 0)
+		{perror("Error en semop de shared mem 4 \n");}
+	
 		sleep(T_GET_TEMP);
 			
 	}
@@ -390,6 +429,31 @@ int genBadMethodMsg(char** pMsg)
 int genPageMsg(char** pMsg)
 {return genMsg(pMsg,httpOk,httpTextHeader,htmlPage,0);}
 
+int genTemp(int SemID, struct sembuf* SemBuf)
+{
+	char auxBuff[4096]; //buffer auxiliar para guardar el mensaje con el sprintf
+	char* strTot;
+	
+	
+	char strTemps[] ="<h2 style=\"color: #0000CC;text-align: center;\">Temperatura Media: %.2f</h2>\
+					  <h2 style=\"color: #0000CC;text-align: center;\">Temperatura Maxima: %.2f</h2>\
+					  <h2 style=\"color: #0000CC;text-align: center;\">Temperatura Minima: %.2f</h2>\
+					  <h2 style=\"color: #0000CC;text-align: center;\">Ultimas 5 temperaturas: %.2f  %.2f  %.2f  %.2f  %.2f";
+		
+	SemBuf->sem_op=-1; //lockeo el semaforo
+	if(semop(SemID,SemBuf,1) < 0)
+	{perror("Error en semop de shared mem para READ 1\n");}
+	
+	sprintf(auxBuff,strTemps,ShMemTemps->tempMean,ShMemTemps->tempMax,ShMemTemps->tempMin,
+			ShMemTemps->temps[0],ShMemTemps->temps[1],ShMemTemps->temps[2],ShMemTemps->temps[3],ShMemTemps->temps[4]);
+
+	strTot=(char*)malloc(strlen(auxBuff)+1);
+	strTot=strcpy(strTot,auxBuff); 
+	
+	SemBuf->sem_op=1; //lockeo el semaforo
+	if(semop(SemID,SemBuf,1) < 0)
+	{perror("Error en semop de shared mem para READ 2\n");}
+}
 
 int genImgMsg(char** pMsg)
 {
@@ -511,7 +575,7 @@ int genMsg(char** pDest, char* method, char* header, char* html,int imgLen)
 
 void HandlerSIGINT(int signum)
 {
-	exit(1);
+	serverRunning=SERV_OFF;
 }
 
 
