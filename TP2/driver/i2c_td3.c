@@ -244,6 +244,7 @@ static ssize_t i2c_read(struct file *file, char *buf, size_t count, loff_t *nose
 	//Variable auxiliar para la lectura/escritura de registros
 	unsigned int aux=0;
 	size_t count_rx = count; //variable interna utilizada para que no intenten escribir en un tamaño mayor que el del buffer
+	int qret;
 	
 	if(count > RX_BUFF_SIZE)//
 	{count_rx=RX_BUFF_SIZE;}
