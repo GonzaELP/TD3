@@ -53,8 +53,8 @@ DEFINES
 #define SEM_FLG (0666 | IPC_CREAT | IPC_EXCL)
 
 /*Numeros que indican si el servidor esta encendido o apagado*/
-#define SERV_ON 1
-#define SERV_OFF 0
+#define RUNNING 1
+#define NOT_RUNNING 0
 
 /*Direccion del sensos LM75B en el bus I2C (es el valor que tiene con todos los pines de ADDR a GND*/
 #define I2C_LM75_ADDR 0x48
@@ -149,15 +149,16 @@ Definicion de los prototipos de los handler de señales
 ******************************************************************************************************/
 void HandlerSIGCHLD(int); //para Matar a los procesos hijos
 void HandlerSIGINT(int); //para finalizar la ejecucion del programa
-
+void HandlerTempKill(int);//para finalizar la ejecucion del proceso HIJO que lee la temperatura
 
 /****************************************************************************************************
 VARIABLES GLOBALES
 ******************************************************************************************************/
-/*Variables globales que indican si el server esta activo o no
+/*Variables globales que indican si el server y el proceso que lee temperatura estan activos o no
  es global para poder alterarla desde el Handler de SIGINT para finalizar la ejecucion*/
 int serverRunning;
 int sockServer; //lo pongo como variable global para poder cesar la ejecucion del programa durante el Listen
+int tempRunning;
 					
 /**********************************************************/
 /* funcion MAIN                                           */
@@ -196,26 +197,27 @@ int main(int argc, char *argv[])
   if (argc == 2)
   {
 	 //Coloco la variable del servidor corriendo en ON. El handler de SIGINT la apaga. Para salir limpiando todo lo creado
-	serverRunning=SERV_ON; 
+	serverRunning=RUNNING; 
 	
 	/*Vinculo las señales con los handlers*/
 	signal (SIGCHLD, HandlerSIGCHLD);
 	signal (SIGINT, HandlerSIGINT);
+	signal (SIGTERM, HandlerSIGINT); //copio el mismo handler para sigterm, por si me tiran "kill"
 	  
 	/*Creacion e Inicializacion de la SHARED MEMORY*/
-	if(((ShMemKey=ftok(KEY_PATH,'A'))<0) | (serverRunning==SERV_OFF)) //creo la llave
+	if(((ShMemKey=ftok(KEY_PATH,'A'))<0) | (serverRunning==NOT_RUNNING)) //creo la llave
 	{
 		perror("Error al crear la llave de la memoria compartida");
 		exit(EXIT_FAILURE);
 	}
 	  
-	if(((ShMemID=shmget(ShMemID,sizeof(Temps),SHM_FLG))<0) | (serverRunning==SERV_OFF)) //obtengo la region de Memoria compartidas 
+	if(((ShMemID=shmget(ShMemID,sizeof(Temps),SHM_FLG))<0) | (serverRunning==NOT_RUNNING)) //obtengo la region de Memoria compartidas 
 	{
 		perror("Error obtener el ID de la memoria compartida");
 		exit(EXIT_FAILURE);
 	}
 	 
-	if(((ShMemTemps=(Temps*)shmat(ShMemID,NULL,0)) < 0) | (serverRunning==SERV_OFF)) //adjunto la region de memoria compartida al proceso padre
+	if(((ShMemTemps=(Temps*)shmat(ShMemID,NULL,0)) < 0) | (serverRunning==NOT_RUNNING)) //adjunto la region de memoria compartida al proceso padre
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		shmctl(ShMemID, IPC_RMID, 0); //Elimino la memoria compartida
@@ -224,7 +226,7 @@ int main(int argc, char *argv[])
 	}
 	 
 	/*Creacion e inicializacion del SEMAFORO*/
-	if(((SemKey=ftok(KEY_PATH,'Z'))<0) | (serverRunning==SERV_OFF)) //creo la llave del semaforo
+	if(((SemKey=ftok(KEY_PATH,'Z'))<0) | (serverRunning==NOT_RUNNING)) //creo la llave del semaforo
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
@@ -233,7 +235,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	 
-	if(((SemID=semget(SemKey,CANT_SEMS,SEM_FLG)) < 0) | (serverRunning==SERV_OFF)) //Creo el semaforo
+	if(((SemID=semget(SemKey,CANT_SEMS,SEM_FLG)) < 0) | (serverRunning==NOT_RUNNING)) //Creo el semaforo
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		shmdt(ShMemTemps); //Hago un Desattachment del proceso padre a la memoria compartido
@@ -243,7 +245,7 @@ int main(int argc, char *argv[])
 	}
 	 
 	SemArg.val=1;
-	if ((semctl(SemID, 0, SETVAL, SemArg) == -1)  | (serverRunning==SERV_OFF))//inicializo el semaforo
+	if ((semctl(SemID, 0, SETVAL, SemArg) == -1)  | (serverRunning==NOT_RUNNING))//inicializo el semaforo
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		semctl(SemID,0,IPC_RMID); //elimino el semaforo
@@ -254,7 +256,7 @@ int main(int argc, char *argv[])
 	}
 	 
 	/*Creo el proceso hijo para lectura de la temperatura, Si FALLA, elimino el semaforo y la SharedMem*/
-	if(((forkRetVal=fork()) < 0)  | (serverRunning==SERV_OFF))
+	if(((forkRetVal=fork()) < 0)  | (serverRunning==NOT_RUNNING))
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		semctl(SemID,0,IPC_RMID); //elimino el semaforo
@@ -265,6 +267,7 @@ int main(int argc, char *argv[])
 	}
 	if(forkRetVal==0) //proceso hijo de lectura de temperatura. No sale de aqui
 	{
+		tempRunning=RUNNING;
 		fTempChild(SemID, &SemBuf,ShMemTemps); //acciones de obtencion de temperatura
 		exit(EXIT_FAILURE); //jamas deberia llegar aqui
 	}
@@ -275,7 +278,7 @@ int main(int argc, char *argv[])
 	}
 	
 	/*Creo el socket del SERVER*/
-	if(((sockServer = socket(AF_INET, SOCK_STREAM,0)) < 0) | (serverRunning==SERV_OFF))
+	if(((sockServer = socket(AF_INET, SOCK_STREAM,0)) < 0) | (serverRunning==NOT_RUNNING))
 	{
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		kill(pidTempProc,SIGKILL);
@@ -292,7 +295,7 @@ int main(int argc, char *argv[])
 	address.sin_addr.s_addr = htonl(INADDR_ANY);  //Se usa INADDR_ANY cuando no necesito bindear el socket a una IP especifica sino a CUALQUIERA
 
     /* Conecto el socket a la direccion local*/
-	if((bind(sockServer, (struct sockaddr*)&address, sizeof(address)) < 0) | (serverRunning==SERV_OFF))
+	if((bind(sockServer, (struct sockaddr*)&address, sizeof(address)) < 0) | (serverRunning==NOT_RUNNING))
     {
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
 		perror("ERROR al nombrar el socket\n");
@@ -307,7 +310,7 @@ int main(int argc, char *argv[])
 	printf("\n\aServidor ACTIVO escuchando en el puerto: %s\n",argv[1]);
     
 	/*Escucho en el puerto especificado a la espera de conexiones entrantes*/
-	if((listen(sockServer, MAX_CONN) < 0) | (serverRunning==SERV_OFF)) // quedo escuchando en el PORT especificado
+	if((listen(sockServer, MAX_CONN) < 0) | (serverRunning==NOT_RUNNING)) // quedo escuchando en el PORT especificado
     {
 		/*En caso de error, deshago todo lo realizado hasta aqui*/
        perror("ERROR en listen");
@@ -319,7 +322,7 @@ int main(int argc, char *argv[])
        exit(EXIT_FAILURE);
     }
 		
-	while (serverRunning==SERV_ON)
+	while (serverRunning==RUNNING)
 	{
 	  addrlen = sizeof(address);
 	  
@@ -482,6 +485,9 @@ void fTempChild(int SemID, struct sembuf* SemBuf,Temps* ShMemTemps )
 	float tempLeida=0.0;
 	int fd;
 	
+	signal(SIGTERM, HandlerTempKill);
+	signal(SIGINT, HandlerTempKill);
+	
 	/*intento abrir el driver de I2C*/
 	if((fd=open(PATH_I2C,O_RDWR))<0)
 	{
@@ -526,7 +532,7 @@ void fTempChild(int SemID, struct sembuf* SemBuf,Temps* ShMemTemps )
 	
 	i=0;
 	
-	while(1)
+	while(tempRunning)
 	{
 		//Tomo el semaforo para operar sobre la shared MEM
 		SemBuf->sem_op=-1; //lockeo el semaforo
@@ -570,6 +576,9 @@ void fTempChild(int SemID, struct sembuf* SemBuf,Temps* ShMemTemps )
 	
 		sleep(T_GET_TEMP); //duermo el proceso por un tiempo
 	}
+	
+	close(fd);
+	exit(EXIT_SUCCESS);
 	
 }
 
@@ -785,11 +794,18 @@ void HandlerSIGINT(int signum)
 	de esta manera fuerzo que termine el liste() y el server falla en el accept,
 	cerrando el server de manera prolija (es decir eliminando semaforos, shmem, hijos,etc)*/
 	close(sockServer); 
-	serverRunning=SERV_OFF;
+	serverRunning=NOT_RUNNING;
 }
 
 void HandlerSIGCHLD(int signum)
 {
-	pid_t pid;
-	pid=wait(NULL);
+	/*espero que mueran TODOS los hijos, ya que pueden haber muerto varios!
+	 uso 0 para matar procesos */
+	while(waitpid(0,NULL,WNOHANG)>0) {} 
+}
+
+/*Handler para  matar correctamente al proceso hijo que lee temperatura*/
+void HandlerTempKill(int signum)
+{
+		tempRunning=NOT_RUNNING;
 }

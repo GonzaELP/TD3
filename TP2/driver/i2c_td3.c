@@ -105,6 +105,9 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("de Brito Gonzalo");
 MODULE_DESCRIPTION("Driver I2C para BBB");
 
+/*Variable atomica para impedir que varios abran el driver*/
+static atomic_t barrier = ATOMIC_INIT(1); //inicializo el contador en 1.
+
 /*Variables de clase y device utilizadas para el init del driver en kernel*/
 static dev_t dev;
 static struct class *cl; 
@@ -135,6 +138,12 @@ static irq_handler_t  i2c_td3_irq_handler(unsigned int irq, void *dev_id, struct
 
 static int i2c_open(struct inode *i, struct file *f)
 {
+	if(!atomic_dec_and_test(&barrier)) //Para que no este tomado tiene que estar en 0, en cualquier otro caso lo esta
+	{
+		printk(KERN_ALERT "Dispositivo tomado por otro proceso.. \n");
+		return -EBUSY; //devuelvo device ocupado
+	}
+	
 	//Variable auxiliar para leer/escribir registros
 	unsigned int a=0;
 
@@ -212,6 +221,7 @@ static int i2c_open(struct inode *i, struct file *f)
 
 static int i2c_release(struct inode *i, struct file *f)
 {
+	atomic_set(&barrier,1); //vulvo a 1 la barrer
 	printk(KERN_ALERT "Se hace el release del i2c \n");
     return 0;
 }
